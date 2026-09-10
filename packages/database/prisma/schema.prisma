@@ -1,0 +1,64 @@
+generator client {
+ provider = "prisma-client-js"
+}
+
+datasource db {
+ provider = "postgresql"
+ url = env("DATABASE_URL")
+}
+
+model User {
+ id String @id @default(uuid())
+ email String @unique
+ createdAt DateTime @default(now())
+ memberships OrganizationMember[]
+}
+
+model Organization {
+ id String @id @default(uuid())
+ name String
+ members OrganizationMember[]
+ projects Project[]
+ createdAt DateTime @default(now())
+}
+
+model OrganizationMember {
+ id String @id @default(uuid())
+ userId String
+ organizationId String
+ role String @default("MEMBER")
+ user User @relation(fields:[userId], references:[id])
+ organization Organization @relation(fields:[organizationId], references:[id])
+}
+
+model Project {
+ id String @id @default(uuid())
+ name String
+ organizationId String
+ organization Organization @relation(fields:[organizationId], references:[id])
+ websites Website[]
+}
+
+model Website {
+ id String @id @default(uuid())
+ domain String
+ projectId String
+ project Project @relation(fields:[projectId], references:[id])
+ pages Page[]
+ opportunities SeoOpportunity[]
+}
+
+model Page {
+ id String @id @default(uuid())
+ url String
+ websiteId String
+ website Website @relation(fields:[websiteId], references:[id])
+}
+
+model SeoOpportunity {
+ id String @id @default(uuid())
+ type String
+ priority Int
+ websiteId String
+ website Website @relation(fields:[websiteId], references:[id])
+}
