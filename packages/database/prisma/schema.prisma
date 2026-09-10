@@ -46,6 +46,8 @@ model Website {
  project Project @relation(fields:[projectId], references:[id])
  pages Page[]
  opportunities SeoOpportunity[]
+ scans Scan[]
+ recommendations Recommendation[]
 }
 
 model Page {
@@ -61,4 +63,21 @@ model SeoOpportunity {
  priority Int
  websiteId String
  website Website @relation(fields:[websiteId], references:[id])
+}
+
+model Scan {
+ id String @id @default(uuid())
+ status String
+ websiteId String
+ website Website @relation(fields:[websiteId], references:[id])
+ createdAt DateTime @default(now())
+}
+
+model Recommendation {
+ id String @id @default(uuid())
+ title String
+ status String @default("PENDING")
+ websiteId String
+ website Website @relation(fields:[websiteId], references:[id])
+ createdAt DateTime @default(now())
 }
