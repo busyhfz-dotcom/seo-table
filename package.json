@@ -1,6 +1,8 @@
 {
   "name": "seo-table",
+  "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@10.8.2",
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
