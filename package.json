@@ -7,7 +7,11 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
-    "test": "turbo test"
+    "test": "turbo test",
+    "db:generate": "npm run generate --workspace=@seo-table/database",
+    "db:validate": "npm exec --workspace=@seo-table/database -- prisma validate",
+    "db:migrate:deploy": "npm exec --workspace=@seo-table/database -- prisma migrate deploy",
+    "db:migrate:status": "npm exec --workspace=@seo-table/database -- prisma migrate status"
   },
   "workspaces": [
     "apps/*",
