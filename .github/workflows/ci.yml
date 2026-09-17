@@ -10,6 +10,8 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://seotable:seotable@localhost:5432/seotable
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node
@@ -18,5 +20,11 @@ jobs:
           node-version: 22
       - name: Install
         run: npm install
-      - name: Validate
+      - name: Lint workspaces
         run: npm run lint
+      - name: Validate Prisma schema
+        run: npm run db:validate
+      - name: Build crawler contracts
+        run: npm run build --workspace=@seo-table/crawler
+      - name: Build execution policy
+        run: npm run build --workspace=@seo-table/execution
