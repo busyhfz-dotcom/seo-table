@@ -1,11 +1,14 @@
 {
-  "name":"@seo-table/worker",
-  "version":"0.1.0",
-  "private":true,
-  "scripts":{
-    "dev":"tsx src/index.ts"
+  "name": "@seo-table/worker",
+  "version": "0.3.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/index.ts"
   },
-  "dependencies":{
-    "bullmq":"latest"
+  "dependencies": {
+    "bullmq": "6.3.6"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13"
   }
 }
