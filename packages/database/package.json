@@ -1,15 +1,15 @@
 {
-  "name":"@seo-table/database",
-  "version":"0.1.0",
-  "private":true,
-  "scripts":{
-    "generate":"prisma generate",
-    "migrate":"prisma migrate"
+  "name": "@seo-table/database",
+  "version": "0.3.0",
+  "private": true,
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate"
   },
-  "dependencies":{
-    "@prisma/client":"latest"
+  "dependencies": {
+    "@prisma/client": "6.12.0"
   },
-  "devDependencies":{
-    "prisma":"latest"
+  "devDependencies": {
+    "prisma": "6.12.0"
   }
 }
