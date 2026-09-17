@@ -1,5 +1,5 @@
 import { analyzePage, scoreFindings } from './analyzer';
-import { assertPublicHttpUrl, crawlSite } from './crawl';
+import { assertPublicHttpUrl, crawlSite, safeFetch } from './crawl';
 import type { AuditFinding, CrawlOptions, PageSnapshot, SiteAuditResult } from './types';
 
 async function probe(url: URL, path: string, options: CrawlOptions): Promise<'OK' | 'MISSING' | 'ERROR'> {
@@ -7,9 +7,8 @@ async function probe(url: URL, path: string, options: CrawlOptions): Promise<'OK
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
   try {
-    const response = await fetch(target, {
+    const { response } = await safeFetch(target, {
       signal: controller.signal,
-      redirect: 'follow',
       headers: { 'user-agent': options.userAgent ?? 'SEOTableBot/0.3' },
     });
     if (response.status === 404) return 'MISSING';
