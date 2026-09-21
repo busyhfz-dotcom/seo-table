@@ -1,0 +1,39 @@
+{
+  "name": "seo-table",
+  "private": true,
+  "version": "0.4.0",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @seo/db build && pnpm --filter @seo/core build && pnpm --filter @seo/connectors build && pnpm --filter @seo/pipeline build && pnpm --filter @seo/worker build && pnpm --filter @seo/web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "pnpm --filter @seo/db migrate",
+    "db:deploy": "pnpm --filter @seo/db deploy",
+    "db:seed": "pnpm --filter @seo/db seed",
+    "dev:web": "pnpm --filter @seo/web dev",
+    "dev:worker": "pnpm --filter @seo/worker dev",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "devDependencies": {
+    "@seo/connectors": "workspace:*",
+    "@seo/core": "workspace:*",
+    "@seo/db": "workspace:*",
+    "@seo/pipeline": "workspace:*",
+    "@types/node": "^22.10.2",
+    "playwright": "1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.23",
+      "sharp": ">=0.35.4"
+    }
+  }
+}
