@@ -16,7 +16,9 @@ COPY packages/connectors/package.json packages/connectors/
 COPY packages/pipeline/package.json packages/pipeline/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+# No BuildKit cache mount: Railway rejects cache mounts whose id is not
+# prefixed with its own service id, and the id differs per service.
+RUN pnpm install --frozen-lockfile
 
 # ---- build ----------------------------------------------------------------
 FROM deps AS build

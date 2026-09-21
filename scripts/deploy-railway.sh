@@ -153,7 +153,8 @@ fi
 # ---------------------------------------------------------------- wait for health
 say "Waiting for /api/ready"
 for i in $(seq 1 90); do
-  if curl -sf "$BASE_URL/api/ready" >/dev/null; then echo "  ready"; break; fi
+  if curl -sf -m 10 "$BASE_URL/api/ready" >/dev/null; then echo "  ready"; break; fi
+  [ $((i % 6)) = 0 ] && echo "  still waiting ($((i * 5 / 60)) min) - build progress: railway logs --service web --build"
   [ "$i" = 90 ] && die "web did not become ready; check 'railway logs --service web'"
   sleep 5
 done
