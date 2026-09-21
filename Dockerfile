@@ -23,6 +23,9 @@ RUN pnpm install --frozen-lockfile
 # ---- build ----------------------------------------------------------------
 FROM deps AS build
 COPY . .
+# A checkout on Windows can turn LF into CRLF, which breaks every shell script
+# ("set: Illegal option -"). Normalise them whatever the source machine was.
+RUN find . -path ./node_modules -prune -o -name '*.sh' -type f -exec sed -i 's/\r$//' {} +
 # The build needs a syntactically valid environment but never connects to it.
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build \
     REDIS_URL=redis://localhost:6379 \
