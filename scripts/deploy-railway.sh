@@ -123,7 +123,9 @@ COMMON=(
 )
 
 say "Variables"
-set_vars web    "${COMMON[@]}" --set "SERVICE_ROLE=web" --set 'APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}' \
+# Pin the web port so the public domain and the app always agree
+# (the Dockerfile EXPOSEs 3000; Railway would otherwise inject its own PORT).
+set_vars web    "${COMMON[@]}" --set "SERVICE_ROLE=web" --set "PORT=3000" --set 'APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}' \
                 --set "OWNER_EMAIL=$OWNER_EMAIL" --set "OWNER_PASSWORD=$OWNER_PASSWORD" \
                 --set "SEED_SITE=${SEED_SITE:-}"
 set_vars worker "${COMMON[@]}" --set "SERVICE_ROLE=worker" --set "WORKER_CONCURRENCY=2"
@@ -138,7 +140,7 @@ railway up --service worker --detach
 
 # ---------------------------------------------------------------- domain
 say "Public domain"
-DOMAIN="$(railway domain --service web 2>/dev/null | grep -Eo '[a-z0-9.-]+\.up\.railway\.app' | head -1 || true)"
+DOMAIN="$(railway domain --service web --port 3000 2>/dev/null | grep -Eo '[a-z0-9.-]+\.up\.railway\.app' | head -1 || true)"
 [ -n "$DOMAIN" ] || die "Could not obtain a railway.app domain; run 'railway domain --service web'"
 BASE_URL="https://$DOMAIN"
 echo "  $BASE_URL"
