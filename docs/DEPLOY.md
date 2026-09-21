@@ -19,6 +19,27 @@ The script creates the project and services, generates `ENCRYPTION_KEY` and
 deploys both services, assigns a `*.up.railway.app` domain, waits for
 `/api/ready`, and runs the smoke test when `SEED_SITE` is set.
 
+## PostgreSQL on Neon instead of Railway
+
+Set `EXTERNAL_DATABASE_URL` and the script skips the Railway Postgres service
+(three Railway services instead of four):
+
+```bash
+EXTERNAL_DATABASE_URL='postgresql://…@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require' \
+OWNER_EMAIL=… OWNER_PASSWORD=… ./scripts/deploy-railway.sh
+```
+
+- Copy the connection string from Neon → Connect. The script switches a
+  `-pooler` host to the direct endpoint (migrations hold a session-level
+  advisory lock, which PgBouncer's transaction mode does not keep), drops
+  `channel_binding` and sets `sslmode=verify-full`.
+- Pick a Neon region close to Railway's (e.g. Frankfurt with EU West).
+- Neon's free tier suspends compute after a few idle minutes; the first query
+  afterwards takes ~0.5 s longer. The pool tolerates the server closing idle
+  connections.
+- Keep Redis on Railway: BullMQ polls Redis continuously, which exhausts
+  request-metered free Redis plans quickly.
+
 ## Manual
 
 1. New project → add **PostgreSQL** and **Redis**.

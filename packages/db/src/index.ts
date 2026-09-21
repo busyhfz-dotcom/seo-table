@@ -13,7 +13,7 @@ export type Db = NodePgDatabase<typeof schema>;
 function makePool(): Pool {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  const needsSsl = /\bsslmode=require\b/.test(url) || process.env.PGSSL === "require";
+  const needsSsl = /\bsslmode=(require|verify-ca|verify-full)\b/.test(url) || process.env.PGSSL === "require";
   return new Pool({
     connectionString: url,
     max: Number(process.env.DB_POOL_MAX ?? 10),
@@ -24,6 +24,16 @@ function makePool(): Pool {
 }
 
 export const pool: Pool = globalForDb.__seoPool ?? makePool();
+
+// An idle connection can be closed by the server at any time (a serverless
+// Postgres such as Neon suspends after a few minutes without queries). pg emits
+// that as an 'error' event on the pool; without a listener Node would crash the
+// process. The pool drops the dead client and opens a new one on the next query.
+if (pool.listenerCount("error") === 0) {
+  pool.on("error", (err) => {
+    console.warn(`[db] idle connection closed by the server: ${err.message}`);
+  });
+}
 export const db: Db = globalForDb.__seoDb ?? drizzle(pool, { schema });
 
 if (process.env.NODE_ENV === "development") {

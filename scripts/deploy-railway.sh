@@ -12,6 +12,8 @@
 #
 # Optional:
 #   RAILWAY_PROJECT_NAME   default: seo-table
+#   EXTERNAL_DATABASE_URL  use this Postgres (e.g. Neon, direct endpoint) instead
+#                          of creating a Railway Postgres service
 #   SEED_SITE              first project's site URL (you can also add it in the UI)
 #   CUSTOM_DOMAIN          e.g. app.example.ir — prints the DNS record to create
 #
@@ -38,8 +40,35 @@ if ! railway status >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------- data services
-say "PostgreSQL and Redis"
-railway add --database postgres 2>/dev/null || echo "  postgres already present"
+# EXTERNAL_DATABASE_URL: use a Postgres outside Railway (for example Neon)
+# instead of creating a Railway Postgres service.
+if [ -n "${EXTERNAL_DATABASE_URL:-}" ]; then
+  say "PostgreSQL: external database (Railway Postgres is not created)"
+  # Normalise a Neon connection string:
+  #  - the direct endpoint, not '-pooler': migrations hold a session-level
+  #    advisory lock, which a transaction-mode pooler does not keep;
+  #  - sslmode=verify-full (Neon certificates are publicly trusted);
+  #    channel_binding dropped (node-postgres negotiates SCRAM itself).
+  DB_URL="$(EXTERNAL_DATABASE_URL="$EXTERNAL_DATABASE_URL" node -e '
+    const raw = process.env.EXTERNAL_DATABASE_URL.trim().replace(/^psql\s+/, "").replace(/^["\x27]|["\x27]$/g, "");
+    let u;
+    try { u = new URL(raw); } catch { console.error("not a valid URL"); process.exit(2); }
+    if (!/^postgres(ql)?:$/.test(u.protocol)) { console.error("must start with postgresql://"); process.exit(2); }
+    if (!u.password) { console.error("the connection string has no password"); process.exit(2); }
+    u.hostname = u.hostname.replace(/-pooler(?=\.)/, "");
+    u.searchParams.delete("channel_binding");
+    u.searchParams.set("sslmode", "verify-full");
+    process.stdout.write(u.toString());
+  ')" || die "EXTERNAL_DATABASE_URL is not a usable PostgreSQL connection string"
+  DB_HOST="$(printf '%s' "$DB_URL" | sed -E 's#^[a-z]+://[^@]*@([^/:?]+).*#\1#')"
+  echo "  host: $DB_HOST"
+  DATABASE_URL_VALUE="$DB_URL"
+else
+  say "PostgreSQL"
+  railway add --database postgres 2>/dev/null || echo "  postgres already present"
+  DATABASE_URL_VALUE='${{Postgres.DATABASE_URL}}'
+fi
+say "Redis"
 railway add --database redis 2>/dev/null || echo "  redis already present"
 
 # ---------------------------------------------------------------- app services
@@ -67,7 +96,7 @@ set_vars() {
 }
 
 COMMON=(
-  --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}'
+  --set "DATABASE_URL=$DATABASE_URL_VALUE"
   --set 'REDIS_URL=${{Redis.REDIS_URL}}'
   --set "ENCRYPTION_KEY=$ENCRYPTION_KEY"
   --set "SESSION_SECRET=$SESSION_SECRET"
