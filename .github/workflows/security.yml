@@ -53,7 +53,10 @@ jobs:
 
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    # GitHub only offers dependency review on public repositories or private ones
+    # with Advanced Security; elsewhere the action fails before looking at the
+    # diff. The pnpm audit job covers known vulnerabilities in every case.
+    if: github.event_name == 'pull_request' && !github.event.repository.private
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
