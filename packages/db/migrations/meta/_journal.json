@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789936071948,
+      "tag": "0000_init_v04",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789936077909,
+      "tag": "0001_audit_pipeline_v04_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789937374256,
+      "tag": "0002_redirect_target",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789937375137,
+      "tag": "0003_append_only_purge_door",
+      "breakpoints": true
+    }
+  ]
+}

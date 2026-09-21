@@ -1,0 +1,1 @@
+ALTER TABLE "page_snapshots" ADD COLUMN "redirect_target" text;
