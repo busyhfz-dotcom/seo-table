@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { redirectTo } from "../../../../lib/redirect";
 import { logout } from "../../../../lib/auth";
 
 /**
@@ -6,7 +6,7 @@ import { logout } from "../../../../lib/auth";
  * redirects rather than returning JSON so the plain HTML form works without
  * client-side JavaScript.
  */
-export async function POST(req: NextRequest) {
+export async function POST() {
   await logout();
-  return NextResponse.redirect(new URL("/login", req.nextUrl.origin), { status: 303 });
+  return redirectTo("/login", 303);
 }

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { login, currentSession } from "../../lib/auth";
 import { DEFAULT_LOCALE, dirOf, isLocale, translator } from "../../lib/i18n";
 import { Note } from "../../components/ui";
+import { safePath } from "../../lib/redirect";
 
 export const dynamic = "force-dynamic";
 
@@ -20,18 +21,18 @@ export default async function LoginPage({
   const locale = isLocale(cookie) ? cookie : DEFAULT_LOCALE;
   const t = translator(locale);
 
-  if (await currentSession()) redirect(params.next ?? "/");
+  if (await currentSession()) redirect(safePath(params.next));
 
   async function submit(formData: FormData) {
     "use server";
     const email = String(formData.get("email") ?? "");
     const password = String(formData.get("password") ?? "");
-    const next = String(formData.get("next") ?? "/");
+    const next = safePath(String(formData.get("next") ?? "/"));
     const result = await login(email, password);
     if (!result.ok) {
       redirect(`/login?error=1${next !== "/" ? `&next=${encodeURIComponent(next)}` : ""}`);
     }
-    redirect(next.startsWith("/") ? next : "/");
+    redirect(next);
   }
 
   return (

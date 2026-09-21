@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { publicOrigin } from "./lib/redirect";
 
 /**
  * Two jobs, both cheap enough for the edge:
@@ -21,7 +22,7 @@ export function middleware(req: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic = PUBLIC.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   if (!isApi && !isPublic && !req.cookies.has("seo_session")) {
-    const url = new URL("/login", req.nextUrl.origin);
+    const url = new URL("/login", publicOrigin(req));
     if (pathname !== "/") url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }

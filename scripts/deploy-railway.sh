@@ -140,7 +140,8 @@ railway up --service worker --detach
 
 # ---------------------------------------------------------------- domain
 say "Public domain"
-DOMAIN="$(railway domain --service web --port 3000 2>/dev/null | grep -Eo '[a-z0-9.-]+\.up\.railway\.app' | head -1 || true)"
+DOMAIN="$( { railway domain --service web --port 3000 2>/dev/null || railway domain --service web 2>/dev/null; } \
+  | grep -Eo '[a-z0-9.-]+\.up\.railway\.app' | head -1 || true)"
 [ -n "$DOMAIN" ] || die "Could not obtain a railway.app domain; run 'railway domain --service web'"
 BASE_URL="https://$DOMAIN"
 echo "  $BASE_URL"
@@ -162,9 +163,12 @@ for i in $(seq 1 90); do
 done
 
 # The owner account is created inside the web container on its first start
-# (scripts/start.sh), where the private database hostname resolves. It only
-# ever runs against an empty users table, so the variables are inert afterwards;
-# delete OWNER_PASSWORD from the web service's variables once you have signed in.
+# (scripts/start.sh) and only ever against an empty users table. Once the app
+# is ready the account exists, so the password has no reason to stay stored.
+say "Removing OWNER_PASSWORD from Railway (the owner account now exists)"
+railway variable delete OWNER_PASSWORD --service web --skip-deploys </dev/null >/dev/null 2>&1 \
+  || railway variable delete OWNER_PASSWORD --service web </dev/null >/dev/null 2>&1 \
+  || echo "  could not remove it automatically: delete OWNER_PASSWORD in web > Variables"
 
 # ---------------------------------------------------------------- smoke
 say "Smoke test against $BASE_URL"

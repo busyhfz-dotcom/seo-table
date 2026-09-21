@@ -78,6 +78,20 @@ async function main(): Promise<void> {
   check(badLogin.status === 401, "wrong password is refused", badLogin.status);
   const page = await fetch(`${BASE}/`, { redirect: "manual" });
   check(page.status === 307 || page.status === 302, "anonymous page load redirects to /login", page.status);
+  // Behind a proxy the server only knows its bind address; redirects must be
+  // relative or the browser is sent to http://0.0.0.0:3000.
+  for (const [path, method] of [["/", "GET"], ["/api/locale?set=en&next=/issues", "GET"], ["/api/auth/logout", "POST"]] as const) {
+    const r = await fetch(`${BASE}${path}`, {
+      method,
+      redirect: "manual",
+      headers: { "x-forwarded-host": "public.example", "x-forwarded-proto": "https" },
+    });
+    const loc = r.headers.get("location") ?? "";
+    const ok = loc.startsWith("/") ? !loc.startsWith("//") : loc.startsWith("https://public.example/");
+    check(ok, `${method} ${path} redirects to the public address (${loc})`, loc);
+  }
+  const evil = await fetch(`${BASE}/api/locale?set=en&next=//evil.example`, { redirect: "manual" });
+  check(evil.headers.get("location") === "/", "locale switch refuses an off-site next", evil.headers.get("location"));
 
   console.log("auth");
   const login = await call("POST", "/api/auth/login", { email: EMAIL, password: PASSWORD });
@@ -156,7 +170,7 @@ async function main(): Promise<void> {
     policy.data?.policy,
   );
 
-  const log = await call("GET", "/api/audit-log?perPage=50");
+  const log = await call("GET", "/api/audit-log?perPage=200");
   const actions = new Set((log.data?.entries ?? []).map((e: any) => e.action));
   check(actions.has("scan.enqueue") && actions.has("scan.refused_overlap"), "audit log recorded the scan and the refused overlap", [...actions]);
 

@@ -1,4 +1,5 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
+import { redirectTo, safePath } from "../../../lib/redirect";
 import { isLocale } from "../../../lib/i18n";
 
 /**
@@ -7,9 +8,7 @@ import { isLocale } from "../../../lib/i18n";
  */
 export function GET(req: NextRequest) {
   const requested = req.nextUrl.searchParams.get("set");
-  const back = req.nextUrl.searchParams.get("next") ?? "/";
-  const target = back.startsWith("/") ? back : "/";
-  const res = NextResponse.redirect(new URL(target, req.nextUrl.origin));
+  const res = redirectTo(safePath(req.nextUrl.searchParams.get("next")));
   if (isLocale(requested)) {
     res.cookies.set("locale", requested, {
       path: "/",
