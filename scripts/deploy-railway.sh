@@ -65,16 +65,33 @@ if [ -n "${EXTERNAL_DATABASE_URL:-}" ]; then
   DATABASE_URL_VALUE="$DB_URL"
 else
   say "PostgreSQL"
-  railway add --database postgres 2>/dev/null || echo "  postgres already present"
+  if printf '%s' "$(railway status --json 2>/dev/null || true)" | grep -qi '"name": *"postgres"'; then
+    echo "  postgres already present"
+  else
+    railway add --database postgres </dev/null || die "could not create Postgres"
+  fi
   DATABASE_URL_VALUE='${{Postgres.DATABASE_URL}}'
 fi
 say "Redis"
-railway add --database redis 2>/dev/null || echo "  redis already present"
+if printf '%s' "$(railway status --json 2>/dev/null || true)" | grep -qi '"name": *"redis"'; then
+  echo "  redis already present"
+else
+  railway add --database redis </dev/null || die "could not create Redis"
+fi
 
 # ---------------------------------------------------------------- app services
 say "Services: web and worker"
-railway add --service web 2>/dev/null || echo "  web already present"
-railway add --service worker 2>/dev/null || echo "  worker already present"
+# --variables keeps `railway add` from asking for variables on an invisible
+# prompt; stdin from /dev/null makes any other prompt fail fast instead of hanging.
+existing_services="$(railway status --json 2>/dev/null || true)"
+for svc in web worker; do
+  if printf '%s' "$existing_services" | grep -q "\"name\": *\"$svc\""; then
+    echo "  $svc already present"
+  else
+    railway add --service "$svc" --variables "SERVICE_ROLE=$svc" </dev/null \
+      || die "could not create the $svc service"
+  fi
+done
 
 # ---------------------------------------------------------------- secrets
 # Generated once. If they already exist they are left alone: rotating
