@@ -13,10 +13,11 @@ import { groupFindings } from "./rules/index.js";
 
 describe("normalizeUrl", () => {
   it("drops fragments, tracking params and default ports; sorts the rest", () => {
-    expect(normalizeUrl("HTTPS://Example.IR:443/a/?utm_source=x&b=2&a=1#top")).toBe("https://example.ir/a?a=1&b=2");
+    expect(normalizeUrl("HTTPS://Example.IR:443/a/?utm_source=x&b=2&a=1#top")).toBe("https://example.ir/a/?a=1&b=2");
   });
-  it("treats /x/ and /x/index.html as one page", () => {
-    expect(normalizeUrl("https://e.ir/x/index.html")).toBe(normalizeUrl("https://e.ir/x/"));
+  it("keeps /x, /x/ and /x/index.html apart: servers answer them differently", () => {
+    expect(normalizeUrl("https://e.ir/x/index.html")).not.toBe(normalizeUrl("https://e.ir/x/"));
+    expect(normalizeUrl("https://e.ir/x")).not.toBe(normalizeUrl("https://e.ir/x/"));
   });
   it("rejects non-http schemes", () => {
     expect(normalizeUrl("mailto:a@b.c")).toBeNull();
@@ -62,7 +63,7 @@ describe("robots.txt", () => {
     expect(robots.sitemaps).toEqual(["https://e.ir/sitemap.xml"]);
   });
   it("a missing robots.txt allows everything", () => {
-    expect(isAllowed(parseRobots("", true), "https://e.ir/anything", "x")).toBe(true);
+    expect(isAllowed(parseRobots("", "missing"), "https://e.ir/anything", "x")).toBe(true);
   });
   it("parses sitemap indexes separately from url sets", () => {
     expect(parseSitemap("<sitemapindex><sitemap><loc>https://e.ir/a.xml</loc></sitemap></sitemapindex>").sitemaps).toEqual([

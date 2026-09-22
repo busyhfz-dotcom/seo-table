@@ -9,7 +9,8 @@ export type AnalyzedLink = { url: string; internal: boolean; nofollow: boolean; 
 export type AnalyzedPage = {
   url: string;
   normalizedUrl: string;
-  depth: number;
+  /** Clicks from the home page; null when the page is not reachable by links (sitemap-only). */
+  depth: number | null;
   statusCode: number;
   responseMs: number;
   title: string | null;
@@ -47,6 +48,8 @@ export type RuleContext = {
   byUrl: Map<string, AnalyzedPage>;
   sitemapUrls: Set<string>;
   robots: Robots;
+  /** The crawler's User-Agent, so robots.txt is evaluated for the agent that crawled. */
+  userAgent: string;
   thresholds: Thresholds;
 };
 
@@ -123,6 +126,14 @@ export function trimToLength(text: string, max: number): string {
   const lastSpace = sliced.lastIndexOf(" ");
   const cut = lastSpace > max * 0.6 ? sliced.slice(0, lastSpace) : sliced;
   return `${cut.replace(/[،,;:\-–—\s]+$/u, "")}`;
+}
+
+/**
+ * A 200 that is an HTML document. A PDF or image answering 200 is marked
+ * `non_html` by the crawler and no HTML rule applies to it.
+ */
+export function isHtmlPage(page: AnalyzedPage): boolean {
+  return page.statusCode === 200 && page.noindexReason !== "non_html";
 }
 
 export function brandOf(ctx: RuleContext): string {

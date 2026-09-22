@@ -6,7 +6,7 @@
  * database refuses to let it execute without an approval row.
  */
 import { isAllowed } from "../robots.js";
-import type { Finding, Rule, RuleContext } from "./types.js";
+import { isHtmlPage, type Finding, type Rule } from "./types.js";
 
 export const canonicalMissing: Rule = {
   id: "rule.canonical.missing",
@@ -15,7 +15,7 @@ export const canonicalMissing: Rule = {
   run(ctx) {
     const out: Finding[] = [];
     for (const page of ctx.pages) {
-      if (page.statusCode !== 200) continue;
+      if (!isHtmlPage(page)) continue;
       if (page.canonical) continue;
       out.push({
         ruleId: this.id,
@@ -46,32 +46,45 @@ export const canonicalMissing: Rule = {
 export const canonicalBroken: Rule = {
   id: "rule.canonical.broken",
   category: "canonical",
-  description: "Canonical points at a URL that errors, redirects, or was not found in the crawl.",
+  description: "Canonical points at a URL that errors, redirects, or could not be checked.",
   run(ctx) {
     const out: Finding[] = [];
     for (const page of ctx.pages) {
       const target = page.canonical;
       if (!target || target === page.normalizedUrl) continue;
       const targetPage = ctx.byUrl.get(target);
-      const broken = Boolean(
-        targetPage &&
-          (targetPage.statusCode >= 400 ||
-            targetPage.statusCode === 0 ||
-            (targetPage.statusCode >= 300 && targetPage.statusCode < 400)),
-      );
-      const missing = !targetPage && sameHost(target, ctx.project.baseUrl);
-      if (!broken && !missing) continue;
+      if (!targetPage) {
+        // The crawler fetches out-of-crawl canonical targets within a budget; one
+        // still missing (robots.txt, budget) was never observed, so it is not
+        // called broken — only reported as unverified, with nothing to fix yet.
+        if (!sameHost(target, ctx.project.baseUrl)) continue;
+        out.push({
+          ruleId: this.id,
+          category: this.category,
+          severity: "INFO",
+          title: "Canonical target could not be verified",
+          groupKey: "unverified_target",
+          url: page.normalizedUrl,
+          evidence: { canonical: target, reason: "target_not_fetched" },
+        });
+        continue;
+      }
+      const broken =
+        targetPage.statusCode >= 400 ||
+        targetPage.statusCode === 0 ||
+        (targetPage.statusCode >= 300 && targetPage.statusCode < 400);
+      if (!broken) continue;
       out.push({
         ruleId: this.id,
         category: this.category,
         severity: "CRITICAL",
         title: "Canonical points to a page that cannot be indexed",
-        groupKey: broken ? "broken_target" : "unknown_target",
+        groupKey: "broken_target",
         url: page.normalizedUrl,
         evidence: {
           canonical: target,
-          targetStatus: targetPage?.statusCode ?? null,
-          reason: broken ? "target_error_or_redirect" : "target_not_reachable_in_crawl",
+          targetStatus: targetPage.statusCode,
+          reason: "target_error_or_redirect",
         },
         fix: {
           action: "CANONICAL_FIX",
@@ -140,7 +153,7 @@ export const robotsTxtBlocksSitemapUrl: Rule = {
   run(ctx) {
     const out: Finding[] = [];
     for (const url of ctx.sitemapUrls) {
-      if (isAllowed(ctx.robots, url, "SeoTableBot")) continue;
+      if (isAllowed(ctx.robots, url, ctx.userAgent)) continue;
       out.push({
         ruleId: this.id,
         category: this.category,
@@ -175,12 +188,35 @@ export const robotsTxtMissing: Rule = {
   },
 };
 
+export const robotsTxtUnreachable: Rule = {
+  id: "rule.robots.unreachable",
+  category: "robots",
+  description: "robots.txt answered with a server error or could not be fetched, so crawlers stop.",
+  run(ctx) {
+    if (!ctx.robots.unreachable) return [];
+    return [
+      {
+        ruleId: this.id,
+        category: this.category,
+        severity: "CRITICAL",
+        title: "robots.txt could not be fetched",
+        url: new URL("/robots.txt", ctx.project.baseUrl).toString(),
+        evidence: {
+          note:
+            "A 5xx or network error on robots.txt makes search engines treat the whole site as disallowed. Nothing else was crawled.",
+        },
+      },
+    ];
+  },
+};
+
 export const sitemapMissing: Rule = {
   id: "rule.sitemap.missing",
   category: "sitemap",
   description: "No sitemap was found via robots.txt or /sitemap.xml.",
   run(ctx) {
-    if (ctx.sitemapUrls.size > 0) return [];
+    // With robots.txt unreachable no sitemap was requested, so absence proves nothing.
+    if (ctx.sitemapUrls.size > 0 || ctx.robots.unreachable) return [];
     return [
       {
         ruleId: this.id,
@@ -239,6 +275,8 @@ export const sitemapUrlNotIndexable: Rule = {
       const page = ctx.byUrl.get(url);
       if (!page) continue;
       if (page.statusCode === 200 && page.indexable) continue;
+      // Sitemaps may list PDFs and other documents; they are not HTML pages to judge.
+      if (page.noindexReason === "non_html") continue;
       out.push({
         ruleId: this.id,
         category: this.category,
@@ -376,6 +414,7 @@ export const TECHNICAL_RULES: Rule[] = [
   canonicalBroken,
   noindexOnLinkedPage,
   robotsTxtMissing,
+  robotsTxtUnreachable,
   robotsTxtBlocksSitemapUrl,
   sitemapMissing,
   pageNotInSitemap,

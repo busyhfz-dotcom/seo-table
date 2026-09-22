@@ -5,9 +5,17 @@
  */
 import * as cheerio from "cheerio";
 import { sha256 } from "./crypto.js";
-import { isProbablyAsset, normalizeUrl, registrableHost } from "./url.js";
+import { absoluteUrl, isProbablyAsset, normalizeUrl, registrableHost } from "./url.js";
 
-export type ExtractedLink = { url: string; internal: boolean; nofollow: boolean; anchor: string };
+export type ExtractedLink = {
+  /** Normalised: the key pages are compared and counted by. */
+  url: string;
+  /** Absolute and as written (fragment removed): what the crawler requests. */
+  href: string;
+  internal: boolean;
+  nofollow: boolean;
+  anchor: string;
+};
 
 export type Extracted = {
   title: string | null;
@@ -32,35 +40,99 @@ export type Extracted = {
   structuredDataTypes: string[];
 };
 
+/** domhandler's AnyNode, reached through cheerio so it needs no dependency of its own. */
+type AnyNode = Exclude<Parameters<typeof cheerio.load>[0], string | Buffer | unknown[]>;
+
 /** Visible-text hash: ignores markup churn so duplicate detection is about content. */
 function normalizeText(text: string): string {
   return text
     .replace(/\s+/g, " ")
-    .replace(/[‌‏‎]/g, "")
+    .replace(/[\u200c\u200f\u200e]/g, "")
     .trim()
     .toLowerCase();
+}
+
+/** Whitespace inside a title or heading is layout, not content, and must not count toward length. */
+function collapse(text: string | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Text nodes joined with spaces. cheerio's .text() concatenates adjacent nodes,
+ * so minified `<li>one</li><li>two</li>` would read as the single word "onetwo".
+ */
+function visibleText(nodes: AnyNode[]): string {
+  const parts: string[] = [];
+  const walk = (list: AnyNode[]) => {
+    for (const node of list) {
+      if (node.type === "text") parts.push(node.data);
+      else if ("children" in node) walk(node.children as AnyNode[]);
+    }
+  };
+  walk(nodes);
+  return parts.join(" ");
+}
+
+/** JSON-LD @type values, including nodes inside @graph containers. */
+function jsonLdTypes(value: unknown, out: string[]): void {
+  if (Array.isArray(value)) {
+    for (const v of value) jsonLdTypes(v, out);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const node = value as { "@type"?: unknown; "@graph"?: unknown };
+  const type = node["@type"];
+  if (typeof type === "string") out.push(type);
+  else if (Array.isArray(type)) out.push(...type.filter((t): t is string => typeof t === "string"));
+  if (node["@graph"] !== undefined) jsonLdTypes(node["@graph"], out);
 }
 
 export function extract(html: string, pageUrl: string): Extracted {
   const $ = cheerio.load(html);
 
+  const structuredDataTypes: string[] = [];
+  $('script[type="application/ld+json" i]').each((_, el) => {
+    try {
+      jsonLdTypes(JSON.parse($(el).text()), structuredDataTypes);
+    } catch {
+      /* malformed JSON-LD is reported by its own rule, not here */
+    }
+  });
+
   $("script, style, noscript, template, svg").remove();
 
-  const title = ($("head > title").first().text() || "").trim() || null;
-  const metaDescription =
-    ($('head meta[name="description"]').attr("content") ?? "").trim() || null;
-  const canonicalRaw = $('head link[rel="canonical"]').attr("href");
-  const canonical = canonicalRaw ? normalizeUrl(canonicalRaw, pageUrl) : null;
-  const robotsMeta = ($('head meta[name="robots"]').attr("content") ?? "").trim() || null;
+  // Meta names are case-insensitive in HTML (`name="Description"` counts).
+  const metaContent = (name: string): string[] =>
+    $("meta[name]")
+      .filter((_, el) => ($(el).attr("name") ?? "").trim().toLowerCase() === name)
+      .map((_, el) => collapse($(el).attr("content")))
+      .get()
+      .filter(Boolean);
+  const linkRel = (rel: string) =>
+    $("link[rel][href]").filter((_, el) =>
+      ($(el).attr("rel") ?? "").toLowerCase().split(/\s+/).includes(rel),
+    );
+
+  // Relative URLs resolve against <base href> when the page declares one.
+  const baseHref = $("base[href]").first().attr("href");
+  const docBase = (baseHref && absoluteUrl(baseHref.trim(), pageUrl)) || pageUrl;
+
+  const title = collapse($("head > title").first().text()) || null;
+  const metaDescription = metaContent("description")[0] ?? null;
+  const canonicalRaw = linkRel("canonical").first().attr("href");
+  const canonical = canonicalRaw ? normalizeUrl(canonicalRaw.trim(), docBase) : null;
+  // Googlebot obeys both its own meta and the generic one, so both are directives here.
+  const robotsDirectives = [...metaContent("robots"), ...metaContent("googlebot")];
+  const robotsMeta = robotsDirectives.length ? robotsDirectives.join(", ") : null;
   const lang = ($("html").attr("lang") ?? "").trim() || null;
 
   const h1s: string[] = [];
   $("h1").each((_, el) => {
-    const text = $(el).text().trim();
+    const text = collapse($(el).text());
     if (text) h1s.push(text);
   });
 
-  const bodyText = normalizeText($("body").text());
+  const bodyText = normalizeText(visibleText($("body").get()));
   const wordCount = bodyText ? bodyText.split(" ").filter((w) => w.length > 1).length : 0;
 
   let imagesTotal = 0;
@@ -76,9 +148,9 @@ export function extract(html: string, pageUrl: string): Extracted {
       imagesMissingAlt++;
       if (imagesWithoutAlt.length < 50) {
         const context =
-          $el.closest("figure").find("figcaption").first().text().trim() ||
+          collapse($el.closest("figure").find("figcaption").first().text()) ||
           $el.attr("title") ||
-          $el.parent().text().trim().slice(0, 80) ||
+          collapse($el.parent().text()).slice(0, 80) ||
           "";
         imagesWithoutAlt.push({ src, context });
       }
@@ -90,49 +162,29 @@ export function extract(html: string, pageUrl: string): Extracted {
   const seen = new Set<string>();
   $("a[href]").each((_, el) => {
     const $el = $(el);
-    const href = $el.attr("href");
+    const href = $el.attr("href")?.trim();
     if (!href || href.startsWith("#") || /^(mailto|tel|javascript):/i.test(href)) return;
-    const abs = normalizeUrl(href, pageUrl);
-    if (!abs || isProbablyAsset(abs)) return;
-    if (seen.has(abs)) return;
-    seen.add(abs);
-    let internal = false;
-    try {
-      internal = registrableHost(new URL(abs).hostname) === host;
-    } catch {
-      return;
-    }
+    const abs = absoluteUrl(href, docBase);
+    const key = abs ? normalizeUrl(abs) : null;
+    if (!abs || !key || isProbablyAsset(key)) return;
+    if (seen.has(key)) return;
+    seen.add(key);
     links.push({
-      url: abs,
-      internal,
+      url: key,
+      href: abs,
+      internal: registrableHost(new URL(key).hostname) === host,
       nofollow: /\bnofollow\b/i.test($el.attr("rel") ?? ""),
-      anchor: $el.text().trim().slice(0, 120),
+      anchor: collapse($el.text()).slice(0, 120),
     });
   });
 
   const hreflang: Array<{ lang: string; href: string }> = [];
-  $('head link[rel="alternate"][hreflang]').each((_, el) => {
+  $("link[rel][hreflang][href]").each((_, el) => {
+    if (!($(el).attr("rel") ?? "").toLowerCase().split(/\s+/).includes("alternate")) return;
     const l = $(el).attr("hreflang");
-    const href = $(el).attr("href");
+    const href = absoluteUrl(($(el).attr("href") ?? "").trim(), docBase);
     if (l && href) hreflang.push({ lang: l, href });
   });
-
-  const structuredDataTypes: string[] = [];
-  cheerio
-    .load(html)('script[type="application/ld+json"]')
-    .each((_, el) => {
-      try {
-        const parsed = JSON.parse(cheerio.load(html)(el).text());
-        const nodes = Array.isArray(parsed) ? parsed : [parsed];
-        for (const node of nodes) {
-          const type = (node as { "@type"?: string | string[] })["@type"];
-          if (typeof type === "string") structuredDataTypes.push(type);
-          else if (Array.isArray(type)) structuredDataTypes.push(...type);
-        }
-      } catch {
-        /* malformed JSON-LD is reported by its own rule, not here */
-      }
-    });
 
   return {
     title,
@@ -153,7 +205,7 @@ export function extract(html: string, pageUrl: string): Extracted {
     contentHash: sha256(html),
     textHash: sha256(bodyText),
     hreflang,
-    hasViewport: cheerio.load(html)('head meta[name="viewport"]').length > 0,
+    hasViewport: metaContent("viewport").length > 0,
     structuredDataTypes: [...new Set(structuredDataTypes)],
   };
 }
@@ -165,6 +217,8 @@ export type IndexabilityInput = {
   allowedByRobotsTxt: boolean;
   canonical: string | null;
   normalizedUrl: string;
+  /** False for a response whose Content-Type is not HTML (a PDF, an image). */
+  isHtml?: boolean;
 };
 
 export type Indexability = { indexable: boolean; reason: string | null };
@@ -173,6 +227,8 @@ export type Indexability = { indexable: boolean; reason: string | null };
 export function indexability(input: IndexabilityInput): Indexability {
   if (input.statusCode >= 400) return { indexable: false, reason: `http_${input.statusCode}` };
   if (input.statusCode >= 300) return { indexable: false, reason: "redirect" };
+  // Not an HTML document, so none of the HTML rules or the page score apply to it.
+  if (input.isHtml === false) return { indexable: false, reason: "non_html" };
   const directives = `${input.robotsMeta ?? ""},${input.xRobotsTag ?? ""}`.toLowerCase();
   if (/\bnoindex\b/.test(directives)) return { indexable: false, reason: "meta_noindex" };
   if (/\bnone\b/.test(directives)) return { indexable: false, reason: "meta_none" };

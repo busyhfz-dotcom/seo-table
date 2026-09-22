@@ -45,7 +45,23 @@ export {
 } from "./rbac.js";
 export { rateLimit, enforce, apiLimit, authLimit, scanLimit, hostGate, type LimitResult } from "./ratelimit.js";
 export { record as recordAudit, AGENT, SYSTEM, type Actor, type AuditAction } from "./auditlog.js";
-export { normalizeUrl, sameSite, registrableHost, pathDepth, isProbablyAsset, joinPath } from "./url.js";
+export {
+  normalizeUrl,
+  absoluteUrl,
+  sameSite,
+  registrableHost,
+  pathDepth,
+  isProbablyAsset,
+  joinPath,
+} from "./url.js";
+export {
+  BlockedAddressError,
+  assertPublicUrl,
+  guardedFetch,
+  isPublicAddress,
+  type GuardedResponse,
+  type GuardedInit,
+} from "./net.js";
 export {
   parseRobots,
   isAllowed,
@@ -53,6 +69,7 @@ export {
   parseSitemap,
   type Robots,
   type RobotsRule,
+  type RobotsState,
 } from "./robots.js";
 export { extract, indexability, type Extracted, type Indexability } from "./extract.js";
 export { crawl, type CrawlOptions, type CrawlResult, type CrawledPage } from "./crawler.js";

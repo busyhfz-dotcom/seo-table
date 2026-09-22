@@ -235,7 +235,8 @@ export const metaDuplicate: Rule = {
           category: this.category,
           severity: "WARNING",
           title: `Duplicate meta description across ${urls.length} pages`,
-          groupKey: key.slice(0, 64),
+          // The whole text: two descriptions sharing their first 64 characters are not duplicates.
+          groupKey: key,
           url,
           evidence: { sharedWith: urls.length, urls: urls.slice(0, 10) },
         });
@@ -353,7 +354,13 @@ function lastPathSegment(url: string): string {
   try {
     const parts = new URL(url).pathname.split("/").filter(Boolean);
     const last = parts[parts.length - 1] ?? "";
-    return last
+    let decoded = last;
+    try {
+      decoded = decodeURIComponent(last);
+    } catch {
+      /* a malformed escape stays as written rather than failing the rule */
+    }
+    return decoded
       .replace(/\.(html?|php)$/i, "")
       .replace(/[-_]+/g, " ")
       .trim();

@@ -1,4 +1,5 @@
 import { fingerprint } from "../crypto.js";
+import { env } from "../env.js";
 import { ONPAGE_RULES } from "./onpage.js";
 import { STRUCTURE_RULES } from "./structure.js";
 import { TECHNICAL_RULES } from "./technical.js";
@@ -51,12 +52,18 @@ export type IssueGroup = {
 
 export function groupFindings(findings: Finding[]): IssueGroup[] {
   const groups = new Map<string, IssueGroup>();
+  // A Set beside each group keeps URL dedupe linear on sites with thousands of occurrences.
+  const urlSets = new Map<string, Set<string>>();
   for (const f of findings) {
     const fp = fingerprint([f.ruleId, f.groupKey ?? ""]);
     const existing = groups.get(fp);
     if (existing) {
       existing.findings.push(f);
-      if (!existing.urls.includes(f.url)) existing.urls.push(f.url);
+      const seen = urlSets.get(fp)!;
+      if (!seen.has(f.url)) {
+        seen.add(f.url);
+        existing.urls.push(f.url);
+      }
       if (severityRank(f.severity) > severityRank(existing.severity)) existing.severity = f.severity;
     } else {
       groups.set(fp, {
@@ -68,6 +75,7 @@ export function groupFindings(findings: Finding[]): IssueGroup[] {
         findings: [f],
         urls: [f.url],
       });
+      urlSets.set(fp, new Set([f.url]));
     }
   }
   return [...groups.values()].sort(
@@ -84,6 +92,8 @@ export type RunRulesInput = {
   pages: AnalyzedPage[];
   sitemapUrls: Set<string>;
   robots: RuleContext["robots"];
+  /** Defaults to the configured CRAWLER_USER_AGENT. */
+  userAgent?: string;
   thresholds?: Partial<Thresholds>;
 };
 
@@ -100,6 +110,7 @@ export function runRules(input: RunRulesInput): RunRulesOutput {
     byUrl: new Map(input.pages.map((p) => [p.normalizedUrl, p])),
     sitemapUrls: input.sitemapUrls,
     robots: input.robots,
+    userAgent: input.userAgent ?? env().CRAWLER_USER_AGENT,
     thresholds: { ...DEFAULT_THRESHOLDS, ...input.thresholds },
   };
 

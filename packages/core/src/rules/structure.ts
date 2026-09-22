@@ -4,6 +4,7 @@
  * A page merge is the most destructive action the product can propose, so it is
  * RESTRICTED: it is only ever a proposal, and only a human can release it.
  */
+import { normalizeUrl } from "../url.js";
 import type { Finding, Rule, RuleContext } from "./types.js";
 
 export const orphanPage: Rule = {
@@ -12,10 +13,11 @@ export const orphanPage: Rule = {
   description: "An indexable page has no internal links pointing at it.",
   run(ctx) {
     const out: Finding[] = [];
-    const home = normalizeHome(ctx);
+    const homes = homeUrls(ctx);
+    const home = [...homes][0] ?? ctx.project.baseUrl;
     for (const page of ctx.pages) {
       if (page.statusCode !== 200 || !page.indexable) continue;
-      if (page.normalizedUrl === home) continue;
+      if (homes.has(page.normalizedUrl)) continue;
       if (page.internalLinksIn > 0) continue;
       out.push({
         ruleId: this.id,
@@ -82,7 +84,8 @@ export const excessiveDepth: Rule = {
     const out: Finding[] = [];
     for (const page of ctx.pages) {
       if (page.statusCode !== 200 || !page.indexable) continue;
-      if (page.depth <= ctx.thresholds.maxDepth) continue;
+      // Unknown depth (a sitemap-only page) is the orphan rule's concern, not this one's.
+      if (page.depth === null || page.depth <= ctx.thresholds.maxDepth) continue;
       out.push({
         ruleId: this.id,
         category: this.category,
@@ -139,7 +142,10 @@ export const duplicateContent: Rule = {
       if (pages.length < 2) continue;
       // The shallowest, best-linked page is the natural survivor.
       const sorted = [...pages].sort(
-        (a, b) => a.depth - b.depth || b.internalLinksIn - a.internalLinksIn,
+        (a, b) =>
+          (a.depth ?? Infinity) - (b.depth ?? Infinity) ||
+          b.internalLinksIn - a.internalLinksIn ||
+          a.normalizedUrl.localeCompare(b.normalizedUrl),
       );
       const keep = sorted[0]!;
       for (const page of sorted) {
@@ -228,16 +234,21 @@ export const numericSlug: Rule = {
   },
 };
 
-function normalizeHome(ctx: RuleContext): string {
-  try {
-    const u = new URL(ctx.project.baseUrl);
-    u.pathname = "/";
-    u.search = "";
-    u.hash = "";
-    return u.toString().replace(/\/$/, "") || u.toString();
-  } catch {
-    return ctx.project.baseUrl;
+/**
+ * Keys the home page can have in this crawl: the configured start URL, the
+ * site root, and wherever the start URL redirects to (http → https, bare → www).
+ * Nothing links to the home page by necessity, so none of them is an orphan.
+ */
+function homeUrls(ctx: RuleContext): Set<string> {
+  const homes = new Set<string>();
+  for (const candidate of [ctx.project.baseUrl, "/"]) {
+    const key = normalizeUrl(candidate, ctx.project.baseUrl);
+    if (!key) continue;
+    homes.add(key);
+    const chain = ctx.byUrl.get(key)?.redirectChain ?? [];
+    for (const hop of chain) homes.add(hop);
   }
+  return homes;
 }
 
 function parentUrl(url: string): string | null {
@@ -258,7 +269,8 @@ export function slugify(input: string): string {
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[‌‎‏]/g, " ")
-    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    // Combining marks (Persian harakat, Indic vowel signs) are part of the word.
+    .replace(/[^\p{Letter}\p{Mark}\p{Number}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 }

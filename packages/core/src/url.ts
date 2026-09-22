@@ -1,24 +1,36 @@
 /**
- * URL normalisation. Two URLs that fetch the same document must normalise to the
- * same string, otherwise duplicate detection and the per-run unique index both
- * misbehave.
+ * URL normalisation. Two URLs normalise to the same string only when they are
+ * the same request as far as any server is concerned, because the crawler dedupes
+ * on this key and the rules compare pages by it. Anything a server may treat as
+ * a different resource — a trailing slash, /index.html, a bare `?flag` — is
+ * kept exactly as written; collapsing those made `/blog` → `/blog/` look like a
+ * redirect to itself.
  */
-const TRACKING_PARAMS = new Set([
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_term",
-  "utm_content",
-  "utm_id",
-  "gclid",
-  "fbclid",
-  "yclid",
-  "msclkid",
-  "mc_cid",
-  "mc_eid",
-  "ref",
-  "_ga",
-]);
+const TRACKING_PARAMS = new Set(["gclid", "fbclid", "msclkid", "mc_eid", "mc_cid", "_hsenc", "_hsmi", "yclid"]);
+
+function isTrackingParam(rawKey: string): boolean {
+  let key = rawKey;
+  try {
+    key = decodeURIComponent(rawKey.replace(/\+/g, " "));
+  } catch {
+    /* an undecodable key is not one of ours */
+  }
+  key = key.toLowerCase();
+  return key.startsWith("utm_") || TRACKING_PARAMS.has(key);
+}
+
+const UNRESERVED = /[A-Za-z0-9\-._~]/;
+
+/**
+ * RFC 3986 §6.2.2: escapes compare case-insensitively and an escaped unreserved
+ * character is the character itself, so `%7e`, `%7E` and `~` are one URL.
+ */
+function normalizeEscapes(s: string): string {
+  return s.replace(/%([0-9a-fA-F]{2})/g, (_, hex: string) => {
+    const ch = String.fromCharCode(parseInt(hex, 16));
+    return UNRESERVED.test(ch) ? ch : `%${hex.toUpperCase()}`;
+  });
+}
 
 export function normalizeUrl(input: string, base?: string): string | null {
   let u: URL;
@@ -29,28 +41,38 @@ export function normalizeUrl(input: string, base?: string): string | null {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return null;
 
+  // WHATWG URL already lowercases the host and drops a default port.
   u.hash = "";
-  u.hostname = u.hostname.toLowerCase().replace(/\.$/, "");
-  if ((u.protocol === "http:" && u.port === "80") || (u.protocol === "https:" && u.port === "443")) {
-    u.port = "";
-  }
+  u.hostname = u.hostname.replace(/\.$/, "");
+  u.pathname = normalizeEscapes(u.pathname || "/");
 
-  const keep: Array<[string, string]> = [];
-  for (const [k, v] of u.searchParams) {
-    if (!TRACKING_PARAMS.has(k.toLowerCase())) keep.push([k, v]);
-  }
-  keep.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
-  u.search = "";
-  for (const [k, v] of keep) u.searchParams.append(k, v);
-
-  // Collapse duplicate slashes, drop a trailing slash except on the root, and
-  // drop an index document so /a/ and /a/index.html are one page.
-  let pathname = u.pathname.replace(/\/{2,}/g, "/");
-  pathname = pathname.replace(/\/index\.(html?|php)$/i, "/");
-  if (pathname.length > 1 && pathname.endsWith("/")) pathname = pathname.slice(0, -1);
-  u.pathname = pathname === "" ? "/" : pathname;
+  // Pairs are split by hand rather than through searchParams, which would turn
+  // `?flag` into `?flag=` and re-encode values the server sees differently.
+  const pairs = u.search
+    .slice(1)
+    .split("&")
+    .filter((pair) => pair !== "" && !isTrackingParam(pair.split("=")[0] ?? ""))
+    .map(normalizeEscapes);
+  pairs.sort((a, b) => {
+    const ka = a.split("=")[0]!;
+    const kb = b.split("=")[0]!;
+    return ka === kb ? 0 : ka < kb ? -1 : 1;
+  });
+  u.search = pairs.length ? `?${pairs.join("&")}` : "";
 
   return u.toString();
+}
+
+/** The URL to request for a discovered href: absolute, without the fragment. */
+export function absoluteUrl(input: string, base?: string): string | null {
+  try {
+    const u = new URL(input, base);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function sameSite(a: string, b: string): boolean {
