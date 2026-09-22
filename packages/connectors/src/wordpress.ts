@@ -105,35 +105,103 @@ export function wordpress(creds: WordPressCredentials): Connector {
     return capCache;
   }
 
+  /**
+   * Verify the credentials and that the account can edit content.
+   *
+   * Real sites put a lot between us and WordPress: security plugins that block
+   * the users endpoint, hosts that strip the Authorization header, WAFs that
+   * answer with an HTML page. Each gets its own reason code so the UI can say
+   * what to change, instead of one generic "not allowed".
+   */
   async function check(): Promise<ConnectorHealth & { capabilities?: ConnectorCapabilities }> {
+    type WpErr = { code?: string; message?: string };
+    type Me = { id?: number; name?: string; capabilities?: Record<string, boolean> } & WpErr;
     try {
-      const { status, data } = await httpJson<{ id?: number; name?: string; capabilities?: Record<string, boolean> }>(
-        `${base}/wp-json/wp/v2/users/me?context=edit`,
+      const me = await httpJson<Me>(`${base}/wp-json/wp/v2/users/me?context=edit`, { headers });
+      if (me.status === 200 && me.data?.id) {
+        const caps = await capabilities();
+        if (me.data.capabilities?.edit_posts === false) {
+          return {
+            ok: false,
+            reason: "insufficient_role",
+            message: "The account cannot edit posts. Use an Editor or Administrator account.",
+            capabilities: caps,
+          };
+        }
+        return { ok: true, message: `Connected as ${me.data.name ?? creds.username}.`, capabilities: caps };
+      }
+
+      // The users endpoint is a favourite target of security plugins. What we
+      // actually need is permission to edit posts, so ask for that directly.
+      const posts = await httpJson<unknown[] | WpErr>(
+        `${base}/wp-json/wp/v2/posts?context=edit&per_page=1&_fields=id`,
         { headers },
       );
-      if (status === 401) {
-        return { ok: false, reason: "invalid_credentials", message: "WordPress rejected the username or application password." };
-      }
-      if (status === 403) {
-        return { ok: false, reason: "forbidden", message: "The account authenticated but is not allowed to edit content." };
-      }
-      if (status >= 400 || !data?.id) {
-        return { ok: false, reason: "unexpected_response", message: `WordPress returned HTTP ${status}.` };
-      }
-      const caps = await capabilities();
-      const canEdit = data.capabilities?.edit_posts !== false;
-      if (!canEdit) {
+      if (posts.status === 200 && Array.isArray(posts.data)) {
+        const caps = await capabilities();
         return {
-          ok: false,
-          reason: "insufficient_role",
-          message: "The account cannot edit posts. Use an Editor or Administrator account.",
-          capabilities: caps,
+          ok: true,
+          message: `Connected as ${creds.username}.`,
+          capabilities: {
+            ...caps,
+            notes: [
+              ...caps.notes,
+              "The site blocks the REST users endpoint (usually a security plugin); editing still works.",
+            ],
+          },
         };
       }
-      return { ok: true, message: `Connected as ${data.name ?? creds.username}.`, capabilities: caps };
+
+      return classify(posts.status === 404 ? me : posts);
     } catch (err) {
       if (err instanceof ConnectorError) return { ok: false, reason: err.code, message: err.message };
       return { ok: false, reason: "network_error", message: (err as Error).message };
+    }
+
+    function classify(res: { status: number; data: WpErr | unknown; text: string }): ConnectorHealth {
+      const body = (res.data && !Array.isArray(res.data) ? (res.data as WpErr) : null) ?? null;
+      const code = body?.code ?? "";
+      const detail = code ? ` (${res.status} ${code})` : ` (HTTP ${res.status})`;
+      if (res.status === 404) {
+        return { ok: false, reason: "rest_api_disabled", message: `The WordPress REST API is not available at /wp-json/${detail}.` };
+      }
+      if (!body && res.status >= 400) {
+        return {
+          ok: false,
+          reason: "firewall_blocked",
+          message: `A firewall or security service answered instead of WordPress${detail}.`,
+        };
+      }
+      if (["incorrect_password", "invalid_username", "invalid_email", "invalid_application_password"].includes(code)) {
+        return { ok: false, reason: "invalid_credentials", message: `WordPress rejected the username or application password${detail}.` };
+      }
+      if (code === "application_passwords_disabled") {
+        return { ok: false, reason: "app_passwords_disabled", message: `Application passwords are disabled on this site${detail}.` };
+      }
+      if (res.status === 401) {
+        // WordPress treated the request as anonymous although we sent credentials:
+        // the web server dropped the Authorization header on the way in.
+        return {
+          ok: false,
+          reason: "credentials_not_received",
+          message: `WordPress did not receive the login (the server drops the Authorization header)${detail}.`,
+        };
+      }
+      if (res.status === 403 && ["rest_forbidden_context", "rest_cannot_edit", "rest_forbidden", "rest_cannot_view"].includes(code)) {
+        return {
+          ok: false,
+          reason: "insufficient_role",
+          message: `The account signed in but cannot edit posts. Use an Editor or Administrator account${detail}.`,
+        };
+      }
+      if (res.status === 403) {
+        return {
+          ok: false,
+          reason: "security_plugin_blocked",
+          message: `A security plugin or host rule blocks the REST API for this account${detail}.`,
+        };
+      }
+      return { ok: false, reason: "unexpected_response", message: `WordPress returned an unexpected response${detail}.` };
     }
   }
 

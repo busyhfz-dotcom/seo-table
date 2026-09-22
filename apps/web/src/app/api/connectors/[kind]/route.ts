@@ -1,3 +1,5 @@
+import { connectorMessage, connectorNotes } from "../../../../lib/connector-messages";
+import { DEFAULT_LOCALE, isLocale } from "../../../../lib/i18n";
 import { z } from "zod";
 import { and, connectors, db, eq, type ConnectorKind } from "@seo/db";
 import { NotFound, BadRequest, recordAudit, seal } from "@seo/core";
@@ -113,11 +115,16 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
     metadata: { kind, ok: result.ok, reason: result.reason ?? null },
   });
 
+  const cookieLocale = req.cookies.get("locale")?.value;
+  const locale = isLocale(cookieLocale) ? cookieLocale : DEFAULT_LOCALE;
   return {
     kind,
     status: result.ok ? "CONNECTED" : "ERROR",
-    message: result.message,
-    capabilities: result.capabilities ?? null,
+    reason: result.reason ?? null,
+    message: connectorMessage(locale, result),
+    capabilities: result.capabilities
+      ? { ...result.capabilities, notes: connectorNotes(locale, result.capabilities.notes) }
+      : null,
   };
 });
 

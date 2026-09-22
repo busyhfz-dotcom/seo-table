@@ -87,6 +87,23 @@ describe("wordpress connector", () => {
     expect(res.reason).toBe("invalid_credentials");
   });
 
+  it.each([
+    ["blockUsers", true, undefined],
+    ["stripAuth", false, "credentials_not_received"],
+    ["waf", false, "firewall_blocked"],
+    ["subscriber", false, "insufficient_role"],
+  ] as const)("explains a %s site precisely", async (mode, ok, reason) => {
+    const site = await startFakeWordPress({ bridge: true, mode });
+    try {
+      const res = await wordpress({ siteUrl: site.baseUrl, ...FAKE_WP_CREDENTIALS }).check();
+      expect(res.ok).toBe(ok);
+      if (reason) expect(res.reason).toBe(reason);
+      if (mode === "blockUsers") expect(res.capabilities?.notes.join(" ")).toMatch(/users endpoint/);
+    } finally {
+      await site.close();
+    }
+  });
+
   it("probes what the site supports", async () => {
     const client = wordpress({ siteUrl: wp.baseUrl, ...FAKE_WP_CREDENTIALS });
     const res = await client.check();

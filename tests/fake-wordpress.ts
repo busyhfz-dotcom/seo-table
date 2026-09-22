@@ -25,7 +25,17 @@ const PASS = "abcd efgh ijkl mnop qrst uvwx";
 
 export const FAKE_WP_CREDENTIALS = { username: USER, applicationPassword: PASS };
 
-export async function startFakeWordPress(opts: { bridge?: boolean } = {}): Promise<FakeWp> {
+/**
+ * `mode` reproduces what real sites put in front of WordPress:
+ *  - blockUsers: a security plugin that 403s /wp/v2/users (editing still works)
+ *  - stripAuth:  a host that drops the Authorization header
+ *  - waf:        a firewall answering with an HTML page
+ *  - subscriber: a valid login whose role cannot edit posts
+ */
+export type FakeWpMode = "normal" | "blockUsers" | "stripAuth" | "waf" | "subscriber";
+
+export async function startFakeWordPress(opts: { bridge?: boolean; mode?: FakeWpMode } = {}): Promise<FakeWp> {
+  const mode = opts.mode ?? "normal";
   let baseUrl = "";
   const media = new Map<number, { id: number; source_url: string; alt_text: string }>();
   const seo = new Map<number, Record<string, string | null>>();
@@ -51,13 +61,33 @@ export async function startFakeWordPress(opts: { bridge?: boolean } = {}): Promi
       });
     }
 
-    // Everything below requires the application password.
+    if (mode === "waf") {
+      res.writeHead(403, { "content-type": "text/html" });
+      return res.end("<html><body><h1>Access denied</h1>Request blocked by firewall.</body></html>");
+    }
+    if (mode === "stripAuth") delete req.headers.authorization;
+
+    // Everything below requires the application password. Like WordPress: no
+    // header at all is anonymous, a wrong application password is its own error.
+    if (!req.headers.authorization) {
+      return send(401, { code: "rest_forbidden_context", message: "Sorry, you are not allowed to edit posts in this post type.", data: { status: 401 } });
+    }
     if (!authorized(req)) {
-      return send(401, { code: "rest_not_logged_in", message: "You are not currently logged in.", data: { status: 401 } });
+      return send(401, { code: "incorrect_password", message: "The provided password is an invalid application password.", data: { status: 401 } });
     }
 
     if (url.pathname === "/wp-json/wp/v2/users/me") {
-      return send(200, { id: 7, name: "SEO Bot", capabilities: { edit_posts: true } });
+      if (mode === "blockUsers") {
+        return send(403, { code: "rest_user_cannot_view", message: "Sorry, you are not allowed to list users.", data: { status: 403 } });
+      }
+      return send(200, { id: 7, name: "SEO Bot", capabilities: { edit_posts: mode !== "subscriber" } });
+    }
+
+    if (url.pathname === "/wp-json/wp/v2/posts" && req.method === "GET") {
+      if (mode === "subscriber") {
+        return send(403, { code: "rest_forbidden_context", message: "Sorry, you are not allowed to edit posts in this post type.", data: { status: 403 } });
+      }
+      return send(200, posts.filter((x) => x.type === "posts").map((x) => ({ id: x.id })));
     }
 
     if (url.pathname === "/wp-json/wp/v2/media" && req.method === "GET") {

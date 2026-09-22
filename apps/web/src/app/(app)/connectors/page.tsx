@@ -7,6 +7,7 @@ import { relative } from "../../../lib/format";
 import { AWAITING_OAUTH_APP, CONNECTOR_KINDS } from "@seo/connectors";
 import { WordPressForm } from "./wordpress-form";
 import { sessionCan } from "../../../lib/auth";
+import { connectorMessage, connectorNotes } from "../../../lib/connector-messages";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export default async function ConnectorsPage({
             const row = byKind.get(kind);
             const status = row?.status ?? "NOT_CONNECTED";
             const awaiting = AWAITING_OAUTH_APP.includes(kind);
-            const notes = (row?.scopes as string[] | undefined) ?? [];
+            const notes = connectorNotes(locale, row?.scopes as string[] | undefined);
             return (
               <section className="card" key={kind}>
                 <div className="body">
@@ -116,7 +117,11 @@ export default async function ConnectorsPage({
 
                   {row?.lastError && (
                     <Note tone="crit" icon="alert">
-                      {row.lastError}
+                      {(() => {
+                        // Stored as "<reason>: <English message>" for the logs.
+                        const [reason, ...rest] = row.lastError.split(": ");
+                        return connectorMessage(locale, { ok: false, reason, message: rest.join(": ") });
+                      })()}
                     </Note>
                   )}
 
