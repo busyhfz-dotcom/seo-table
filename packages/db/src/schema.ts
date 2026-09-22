@@ -242,7 +242,9 @@ export const pageSnapshots = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
     normalizedUrl: text("normalized_url").notNull(),
-    depth: integer("depth").notNull().default(0),
+    // Click depth from the home page; null for pages reached only via the
+    // sitemap or a canonical, where no click path exists.
+    depth: integer("depth"),
     statusCode: integer("status_code").notNull(),
     responseMs: integer("response_ms").notNull().default(0),
     contentHash: text("content_hash").notNull(),

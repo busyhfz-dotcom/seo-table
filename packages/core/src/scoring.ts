@@ -9,7 +9,7 @@
  * severity and capped per category so a single bad category cannot zero a page.
  */
 import { severityRank, type Finding } from "./rules/index.js";
-import type { AnalyzedPage } from "./rules/types.js";
+import { isHtmlPage, type AnalyzedPage } from "./rules/types.js";
 
 const SEVERITY_WEIGHT = { CRITICAL: 30, SERIOUS: 15, WARNING: 6, INFO: 2 } as const;
 const CATEGORY_CAP = 40;
@@ -23,7 +23,8 @@ export type ScoreBreakdown = {
 };
 
 export function computeScore(pages: AnalyzedPage[], findings: Finding[]): ScoreBreakdown {
-  const scorable = pages.filter((p) => p.statusCode === 200);
+  // A PDF or image answering 200 is not a page to score.
+  const scorable = pages.filter(isHtmlPage);
   const byUrl = new Map<string, Finding[]>();
   for (const f of findings) {
     const list = byUrl.get(f.url);

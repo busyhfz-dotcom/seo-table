@@ -36,6 +36,13 @@
       "when": 1790073769683,
       "tag": "0004_hardening_heartbeat_session_org",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790089481472,
+      "tag": "0005_snapshot_depth_nullable",
+      "breakpoints": true
     }
   ]
 }
