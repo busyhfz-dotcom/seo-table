@@ -9,6 +9,8 @@
  * printing. Chart text takes its colour from the theme tokens.
  */
 import { useId, useState } from "react";
+import { num } from "../lib/format";
+import type { Locale } from "../lib/i18n";
 
 export type TrendPoint = { label: string; value: number };
 
@@ -16,10 +18,12 @@ export function ScoreTrend({
   points,
   ariaLabel,
   todayLabel,
+  locale,
 }: {
   points: TrendPoint[];
   ariaLabel: string;
   todayLabel: string;
+  locale: Locale;
 }) {
   const gradientId = useId();
   const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null);
@@ -75,7 +79,7 @@ export function ScoreTrend({
           <g key={v}>
             <line className="grid-l" x1={pl} x2={W - pr} y1={y(v)} y2={y(v)} />
             <text x={pl - 8} y={y(v) + 3.5} textAnchor="end">
-              {v}
+              {num(v, locale)}
             </text>
           </g>
         ))}
@@ -122,11 +126,15 @@ export function ScoreTrend({
 
       {hover && (
         <div
+          dir={locale === "fa" ? "rtl" : "ltr"}
           style={{
             position: "absolute",
-            insetInlineStart: `${(hover.x / W) * 100}%`,
+            // The plot is drawn left-to-right in both languages (time runs
+            // rightwards), so the tooltip is placed in physical coordinates, and
+            // flips to the point's left in the right half so it never overflows.
+            left: `${(hover.x / W) * 100}%`,
             top: `${(hover.y / H) * 100}%`,
-            transform: "translate(8px, -120%)",
+            transform: hover.x > W / 2 ? "translate(calc(-100% - 8px), -120%)" : "translate(8px, -120%)",
             background: "var(--surface-3)",
             boxShadow: "inset 0 0 0 1px var(--border-strong), 0 14px 30px -18px #000",
             borderRadius: "var(--r-sm)",
@@ -136,9 +144,7 @@ export function ScoreTrend({
             pointerEvents: "none",
           }}
         >
-          <b className="num" style={{ fontFamily: "var(--f-en)" }}>
-            {points[hover.i]!.value}
-          </b>{" "}
+          <b className="num">{num(points[hover.i]!.value, locale)}</b>{" "}
           · {points[hover.i]!.label}
         </div>
       )}
@@ -153,7 +159,7 @@ function tickValues(min: number, max: number): number[] {
   return out.length >= 2 ? out : [min, max];
 }
 
-export function ScoreGauge({ score, label }: { score: number; label: string }) {
+export function ScoreGauge({ score, label, locale }: { score: number; label: string; locale: Locale }) {
   const R = 54;
   const C = Math.PI * R;
   const frac = Math.max(0, Math.min(1, score / 100));
@@ -162,7 +168,7 @@ export function ScoreGauge({ score, label }: { score: number; label: string }) {
       viewBox="0 0 140 96"
       style={{ width: 150, height: "auto", flex: "none", direction: "ltr" }}
       role="img"
-      aria-label={`${label}: ${score} / 100`}
+      aria-label={`${label}: ${num(score, locale)} / ${num(100, locale)}`}
     >
       <path d="M16 70a54 54 0 0 1 108 0" fill="none" stroke="#1E2823" strokeWidth="11" strokeLinecap="round" />
       <path
@@ -174,10 +180,10 @@ export function ScoreGauge({ score, label }: { score: number; label: string }) {
         strokeDasharray={`${(C * frac).toFixed(1)} ${C.toFixed(1)}`}
       />
       <text x="70" y="64" textAnchor="middle" style={{ fill: "var(--ink)", fontSize: 26, fontWeight: 600 }}>
-        {score}
+        {num(score, locale)}
       </text>
       <text x="70" y="90" textAnchor="middle">
-        0 – 100
+        {num(0, locale)} – {num(100, locale)}
       </text>
     </svg>
   );

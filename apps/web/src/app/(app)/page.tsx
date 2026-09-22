@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { actionLabel } from "../../lib/labels";
 import { TopBar } from "../../components/shell";
 import { Card, Empty, Note, Status, Table, Tile, Bar } from "../../components/ui";
 import { ScoreGauge, ScoreTrend } from "../../components/charts";
 import { Icon } from "../../components/icons";
-import { pageContext } from "../../lib/page";
+import { pageContext, withProject } from "../../lib/page";
 import { dashboard, health } from "../../lib/queries";
 import { dateTime, duration, num, relative } from "../../lib/format";
+import { describeAction, iconForAction } from "../../lib/activity";
+import { runErrorLabel } from "../../lib/labels";
 import { ScanButton } from "./scan-button";
 
 export const dynamic = "force-dynamic";
@@ -14,18 +15,19 @@ export const dynamic = "force-dynamic";
 const SEVERITY_TONE = { CRITICAL: "crit", SERIOUS: "serious", WARNING: "warn", INFO: "info" } as const;
 
 export default async function DashboardPage() {
-  const { t, locale, pathname, session } = await pageContext();
-  const [data, sys] = await Promise.all([dashboard(session.orgId), health()]);
+  const { t, locale, session, project, requestedProjectId } = await pageContext();
+  const [data, sys] = await Promise.all([dashboard(session.orgId, project?.id), health()]);
+  const href = (path: string) => withProject(path, requestedProjectId);
 
   if (!data.project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("dashboard")} />
+        <TopBar title={t("dashboard")} />
         <div className="view">
           <Card title={t("dashboard")}>
             <Empty icon="rocket">
               <p style={{ marginBottom: 12 }}>{t("no_runs_yet")}</p>
-              <Link className="btn primary" href="/onboarding">
+              <Link className="btn primary" href="/onboarding?new=1">
                 <Icon name="plus" />
                 {t("new_project")}
               </Link>
@@ -46,11 +48,10 @@ export default async function DashboardPage() {
   return (
     <>
       <TopBar
-        t={t}
-        locale={locale}
-        pathname={pathname}
         title={t("dashboard")}
-        right={<ScanButton projectId={data.project.id} label={t("scan")} activeLabel={t("st_running")} />}
+        right={
+          <ScanButton projectId={data.project.id} locale={locale} label={t("scan")} activeLabel={t("st_running")} />
+        }
       />
 
       <div className="view">
@@ -58,14 +59,14 @@ export default async function DashboardPage() {
           <Note tone="acc" icon="play">
             {t("st_running")} — {num(latest.pagesCrawled, locale)}
             {latest.pagesTotal ? ` / ${num(latest.pagesTotal, locale)}` : ""} {t("pages")} ·{" "}
-            <Link href={`/audit?run=${latest.id}`} style={{ textDecoration: "underline" }}>
+            <Link href={href(`/audit?run=${latest.id}`)} style={{ textDecoration: "underline" }}>
               {t("view")}
             </Link>
           </Note>
         )}
-        {latest?.status === "FAILED" && latest.error && (
+        {(latest?.status === "FAILED" || latest?.status === "DEAD_LETTER") && (
           <Note tone="crit" icon="alert">
-            {t("st_failed")}: {latest.error}
+            {t("st_failed")}: {runErrorLabel(latest.errorCode ?? "", locale)}
           </Note>
         )}
 
@@ -83,7 +84,7 @@ export default async function DashboardPage() {
             }
             foot={
               delta === null ? (
-                <span>{data.project.baseUrl.replace(/^https?:\/\//, "")}</span>
+                <span dir="ltr">{data.project.baseUrl.replace(/^https?:\/\//, "")}</span>
               ) : (
                 <>
                   <span className={`delta ${delta >= 0 ? "up" : "down"}`}>
@@ -103,7 +104,7 @@ export default async function DashboardPage() {
             label={t("t_open")}
             value={num(data.openIssues, locale)}
             foot={
-              <Link href="/issues" style={{ color: "var(--ink-3)", textDecoration: "underline" }}>
+              <Link href={href("/issues")} style={{ color: "var(--ink-3)", textDecoration: "underline" }}>
                 {t("view")}
               </Link>
             }
@@ -121,12 +122,15 @@ export default async function DashboardPage() {
             sub={data.trend.length > 1 ? `${num(data.trend.length, locale)} ${t("recent_runs")}` : undefined}
           >
             <div className="gauge-wrap">
-              <ScoreGauge score={score ?? 0} label={t("t_score")} />
+              {score !== null && (
+                <ScoreGauge score={score} label={t("t_score")} locale={locale} />
+              )}
               <div style={{ flex: "1 1 320px", minWidth: 0 }}>
                 {data.trend.length === 0 ? (
                   <Empty>{t("no_runs_yet")}</Empty>
                 ) : (
                   <ScoreTrend
+                    locale={locale}
                     ariaLabel={t("score_trend")}
                     todayLabel={relative(data.trend[data.trend.length - 1]!.at, locale)}
                     points={data.trend.map((p) => ({
@@ -172,7 +176,7 @@ export default async function DashboardPage() {
           <Card
             title={t("recent_runs")}
             right={
-              <Link className="btn ghost sm" href="/audit">
+              <Link className="btn ghost sm" href={href("/audit")}>
                 {t("view")}
               </Link>
             }
@@ -183,7 +187,7 @@ export default async function DashboardPage() {
             ) : (
               <Table
                 head={[
-                  { label: "ID" },
+                  { label: t("run_id") },
                   { label: t("status") },
                   { label: t("pages"), numeric: true },
                   { label: t("score"), numeric: true },
@@ -194,7 +198,7 @@ export default async function DashboardPage() {
                 {data.recentRuns.map((run) => (
                   <tr key={run.id}>
                     <td>
-                      <Link href={`/audit?run=${run.id}`} className="path">
+                      <Link href={href(`/audit?run=${run.id}`)} className="path" dir="ltr">
                         {run.id.slice(-8)}
                       </Link>
                     </td>
@@ -259,7 +263,7 @@ export default async function DashboardPage() {
                   {t("appr_lock")}
                 </Note>
                 <div style={{ marginTop: 12 }}>
-                  <Link className="btn primary" href="/approvals">
+                  <Link className="btn primary" href={href("/approvals")}>
                     <Icon name="shield" />
                     {t("approvals")} ({num(data.pendingApprovals, locale)})
                   </Link>
@@ -271,82 +275,4 @@ export default async function DashboardPage() {
       </div>
     </>
   );
-}
-
-function iconForAction(action: string): string {
-  if (action.startsWith("scan")) return action.includes("fail") ? "x" : "play";
-  if (action.startsWith("fix.apply")) return "wand";
-  if (action.startsWith("fix.rollback")) return "undo";
-  if (action.startsWith("approval")) return "shield";
-  if (action.startsWith("connector")) return "plug";
-  if (action.startsWith("auth")) return "user";
-  if (action.startsWith("apikey")) return "key";
-  return "info";
-}
-
-/**
- * The audit log stores machine actions; this turns one into a sentence. Anything
- * unrecognised is shown as its raw action rather than hidden.
- */
-function describeAction(
-  action: string,
-  actorType: string,
-  metadata: unknown,
-  locale: "fa" | "en",
-): string {
-  const m = (metadata ?? {}) as Record<string, unknown>;
-  const act = actionLabel(String(m.action ?? ""), locale);
-  const n = (v: unknown) => num(Number(v ?? 0), locale);
-  const fa = locale === "fa";
-
-  switch (action) {
-    case "scan.enqueue":
-      return fa ? "اسکن در صف قرار گرفت" : "Scan queued";
-    case "scan.refused_overlap":
-      return fa ? "اسکن رد شد: اسکن دیگری در حال اجراست" : "Scan refused: another is already running";
-    case "scan.cancel":
-      return fa ? "اسکن لغو شد" : "Scan cancelled";
-    case "fix.propose":
-      return fa
-        ? `پیشنهاد اصلاح: ${act} روی ${n(m.targetCount)} هدف`
-        : `Fix proposed: ${act} on ${n(m.targetCount)} targets`;
-    case "fix.dry_run":
-      return fa ? `اجرای آزمایشی: ${n(m.applied)} تغییر` : `Dry run: ${n(m.applied)} changes`;
-    case "fix.apply":
-      return fa
-        ? `${n(m.applied)} تغییر اعمال شد${actorType === "AGENT" ? " (خودکار، کم‌ریسک)" : ""}`
-        : `${n(m.applied)} changes applied${actorType === "AGENT" ? " (automatic, low risk)" : ""}`;
-    case "fix.apply_blocked":
-      return fa ? "اعمال اصلاح مسدود شد (نیازمند تأیید)" : "Fix blocked (approval required)";
-    case "fix.rollback":
-      return fa ? `${n(m.restored)} تغییر بازگردانده شد` : `${n(m.restored)} changes rolled back`;
-    case "approval.request":
-      return fa
-        ? `ارسال برای تأیید: ${act}`
-        : `Sent for approval: ${act}`;
-    case "approval.approve":
-      return fa ? `تأیید شد: ${act}` : `Approved: ${act}`;
-    case "approval.reject":
-      return fa ? `رد شد: ${act}` : `Rejected: ${act}`;
-    case "connector.connect":
-      return m.ok
-        ? fa
-          ? `${String(m.kind)} متصل شد`
-          : `${String(m.kind)} connected`
-        : fa
-          ? `اتصال ${String(m.kind)} ناموفق بود`
-          : `${String(m.kind)} connection failed`;
-    case "connector.sync":
-      return fa ? `${n(m.rows)} ردیف از ${"Search Console"} همگام شد` : `${n(m.rows)} rows synced from Search Console`;
-    case "project.create":
-      return fa ? "پروژه ساخته شد" : "Project created";
-    case "auth.login":
-      return fa ? "ورود به حساب" : "Signed in";
-    case "auth.login_failed":
-      return fa ? "تلاش ناموفق برای ورود" : "Failed sign-in attempt";
-    case "apikey.create":
-      return fa ? "کلید API ساخته شد" : "API key created";
-    default:
-      return action;
-  }
 }

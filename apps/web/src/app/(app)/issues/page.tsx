@@ -1,17 +1,10 @@
 import Link from "next/link";
-import { fixTitle, readableUrl, ruleTitle } from "../../../lib/labels";
+import { categoryLabel, fixTitle, readableUrl, ruleTitle } from "../../../lib/labels";
 import { TopBar } from "../../../components/shell";
 import { Card, Empty, Sev, Status, Table } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext } from "../../../lib/page";
-import {
-  defaultProject,
-  firstIssue,
-  getIssue,
-  getProject,
-  issueCategories,
-  listIssues,
-} from "../../../lib/queries";
+import { pageContext, withProject } from "../../../lib/page";
+import { getIssue, issueCategories, listIssues } from "../../../lib/queries";
 import { dateTime, num, pathOf, relative } from "../../../lib/format";
 import type { Severity } from "@seo/db";
 
@@ -33,16 +26,12 @@ export default async function IssuesPage({
   }>;
 }) {
   const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
-
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+  const { t, locale, project, requestedProjectId } = await pageContext();
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("issues")} />
+        <TopBar title={t("issues")} />
         <div className="view">
           <Card title={t("issues")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -60,7 +49,7 @@ export default async function IssuesPage({
   const pageNo = Math.max(1, Number(params.page ?? 1) || 1);
   const perPage = 40;
 
-  const [{ rows, total }, categories, detail] = await Promise.all([
+  const [{ rows, total }, categories] = await Promise.all([
     listIssues(project.id, {
       ...(severity ? { severity } : {}),
       status,
@@ -70,19 +59,23 @@ export default async function IssuesPage({
       offset: (pageNo - 1) * perPage,
     }),
     issueCategories(project.id),
-    params.issue ? getIssue(project.id, params.issue) : firstIssue(project.id),
   ]);
+  // Without an explicit pick, the detail pane shows the first issue of the list
+  // as filtered, never one the filters exclude.
+  const detailId = params.issue ?? rows[0]?.id;
+  const detail = detailId ? await getIssue(project.id, detailId) : null;
 
+  // Filters combine: every link keeps the others (and the project).
   const qs = (patch: Record<string, string | undefined>) => {
     const sp = new URLSearchParams();
-    const merged = { ...params, ...patch };
+    const merged = { ...params, project: requestedProjectId ?? undefined, ...patch };
     for (const [k, v] of Object.entries(merged)) if (v) sp.set(k, String(v));
     return `/issues?${sp.toString()}`;
   };
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("issues")} />
+      <TopBar title={t("issues")} />
       <div className="view">
         <div className="split">
           <Card
@@ -90,20 +83,40 @@ export default async function IssuesPage({
             sub={`${num(total, locale)} ${t(status === "OPEN" ? "st_open" : status === "FIXED" ? "st_fixed" : "st_ignored")}`}
             right={
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <form action="/issues" method="get" className="search">
+                <form action="/issues" method="get" className="search" role="search">
                   <Icon name="search" />
-                  <input name="q" defaultValue={params.q ?? ""} placeholder={t("search")} id="issue-q" />
+                  <input
+                    name="q"
+                    type="search"
+                    defaultValue={params.q ?? ""}
+                    placeholder={t("search")}
+                    aria-label={t("search_issues")}
+                    id="issue-q"
+                  />
+                  {requestedProjectId && <input type="hidden" name="project" value={requestedProjectId} />}
+                  {status !== "OPEN" && <input type="hidden" name="status" value={status} />}
                   {params.category && <input type="hidden" name="category" value={params.category} />}
                   {severity && <input type="hidden" name="severity" value={severity} />}
                 </form>
-                <div className="seg" role="group">
-                  <Link href={qs({ severity: undefined, page: undefined })} aria-current={!severity}>
+                <div className="seg" role="group" aria-label={t("status")}>
+                  {(["OPEN", "FIXED", "IGNORED"] as const).map((s) => (
+                    <Link
+                      key={s}
+                      href={qs({ status: s === "OPEN" ? undefined : s, page: undefined, issue: undefined })}
+                      aria-current={status === s}
+                    >
+                      {t(s === "OPEN" ? "st_open" : s === "FIXED" ? "st_fixed" : "st_ignored")}
+                    </Link>
+                  ))}
+                </div>
+                <div className="seg" role="group" aria-label={t("severity")}>
+                  <Link href={qs({ severity: undefined, page: undefined, issue: undefined })} aria-current={!severity}>
                     {t("all")}
                   </Link>
                   {SEVERITIES.map((s) => (
                     <Link
                       key={s}
-                      href={qs({ severity: s, page: undefined })}
+                      href={qs({ severity: s, page: undefined, issue: undefined })}
                       aria-current={severity === s}
                     >
                       {t(`sev_${s.toLowerCase()}` as never)}
@@ -137,9 +150,11 @@ export default async function IssuesPage({
                         <Link href={qs({ issue: issue.id })} style={{ fontWeight: 500 }}>
                           {ruleTitle(issue.ruleId, issue.title, locale)}
                         </Link>
-                        <div className="path">{issue.ruleId}</div>
+                        <div className="path" dir="ltr">
+                          {issue.ruleId}
+                        </div>
                       </td>
-                      <td style={{ color: "var(--ink-2)" }}>{issue.category}</td>
+                      <td style={{ color: "var(--ink-2)" }}>{categoryLabel(issue.category, locale)}</td>
                       <td className="tnum">{num(issue.pageCount, locale)}</td>
                       <td className="tnum">{num(issue.occurrenceCount, locale)}</td>
                       <td style={{ color: "var(--ink-3)" }}>{relative(issue.firstSeenAt, locale)}</td>
@@ -175,7 +190,7 @@ export default async function IssuesPage({
             )}
           </Card>
 
-          <Card title={t("issue_detail")} sub={detail?.issue.ruleId}>
+          <Card title={t("issue_detail")} sub={detail ? categoryLabel(detail.issue.category, locale) : undefined}>
             {!detail ? (
               <Empty>{t("nothing_here")}</Empty>
             ) : (
@@ -228,7 +243,7 @@ export default async function IssuesPage({
                     {detail.proposals.map((p) => (
                       <Link
                         key={p.id}
-                        href="/fixes"
+                        href={withProject(p.status === "AWAITING_APPROVAL" ? "/approvals" : "/fixes", requestedProjectId)}
                         className="btn ghost sm"
                         style={{ marginInlineEnd: 6, marginBottom: 6 }}
                       >
@@ -258,7 +273,12 @@ export default async function IssuesPage({
                       </span>
                       <span>
                         {kindLabel(occ.kind, locale)}
-                        {occ.url.startsWith("project:") ? "" : ` · ${pathOf(occ.url)}`}
+                        {occ.url.startsWith("project:") ? "" : " · "}
+                        {!occ.url.startsWith("project:") && (
+                          <span className="path" dir="ltr">
+                            {readableUrl(pathOf(occ.url))}
+                          </span>
+                        )}
                       </span>
                       <time>{relative(occ.observedAt, locale)}</time>
                     </li>
@@ -272,16 +292,19 @@ export default async function IssuesPage({
         {categories.length > 0 && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{t("category")}:</span>
-            <Link className="pill mute" href={qs({ category: undefined, page: undefined })}>
+            <Link
+              className={`pill ${params.category ? "mute" : "acc"}`}
+              href={qs({ category: undefined, page: undefined, issue: undefined })}
+            >
               {t("all")}
             </Link>
             {categories.map((c) => (
               <Link
                 key={c}
                 className={`pill ${params.category === c ? "acc" : "mute"}`}
-                href={qs({ category: c, page: undefined })}
+                href={qs({ category: c, page: undefined, issue: undefined })}
               >
-                {c}
+                {categoryLabel(c, locale)}
               </Link>
             ))}
           </div>

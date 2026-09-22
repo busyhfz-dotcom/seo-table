@@ -2,14 +2,11 @@ import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { Card, Empty, Note, Sev, Table } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext } from "../../../lib/page";
-import {
-  defaultProject,
-  getProject,
-  listConnectors,
-  listOpportunities,
-} from "../../../lib/queries";
+import { pageContext, withProject } from "../../../lib/page";
+import { listConnectors, listOpportunities } from "../../../lib/queries";
 import { decimal, num, pct, relative } from "../../../lib/format";
+import { readableUrl, suggestedActionLabel } from "../../../lib/labels";
+import { can } from "@seo/core";
 import { SyncButton } from "./sync";
 
 export const dynamic = "force-dynamic";
@@ -19,22 +16,13 @@ export const dynamic = "force-dynamic";
  * nothing to show, and this screen says exactly that instead of displaying an
  * invented table — a fabricated keyword list would be worse than an empty one.
  */
-export default async function ContentPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>;
-}) {
-  const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
-
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+export default async function ContentPage() {
+  const { t, locale, session, project, requestedProjectId } = await pageContext();
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("content")} />
+        <TopBar title={t("content")} />
         <div className="view">
           <Card title={t("content")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -53,7 +41,7 @@ export default async function ContentPage({
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("content")} />
+      <TopBar title={t("content")} />
       <div className="view">
         {!connected && <Note icon="info">{t("content_needs_gsc")}</Note>}
 
@@ -66,9 +54,11 @@ export default async function ContentPage({
           }
           right={
             connected ? (
-              <SyncButton label={t("refresh")} busyLabel={t("loading")} />
+              can(session.role, "connector:write") ? (
+                <SyncButton projectId={project.id} locale={locale} label={t("refresh")} busyLabel={t("loading")} />
+              ) : null
             ) : (
-              <Link className="btn primary" href="/connectors">
+              <Link className="btn primary" href={withProject("/connectors", requestedProjectId)}>
                 <Icon name="plug" />
                 {t("connect")} Search Console
               </Link>
@@ -98,7 +88,7 @@ export default async function ContentPage({
                     <div style={{ fontWeight: 500 }}>{o.query}</div>
                     {o.url && (
                       <div className="path" dir="ltr">
-                        {o.url.replace(/^https?:\/\/[^/]+/, "")}
+                        {readableUrl(o.url.replace(/^https?:\/\/[^/]+/, ""))}
                       </div>
                     )}
                   </td>
@@ -109,7 +99,7 @@ export default async function ContentPage({
                   <td>
                     <Sev severity={o.gap} t={t} />
                   </td>
-                  <td style={{ color: "var(--ink-2)" }}>{o.suggestedAction}</td>
+                  <td style={{ color: "var(--ink-2)" }}>{suggestedActionLabel(o.suggestedAction, locale)}</td>
                 </tr>
               ))}
             </Table>

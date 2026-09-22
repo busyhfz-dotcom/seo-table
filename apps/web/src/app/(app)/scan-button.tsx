@@ -4,19 +4,23 @@
  * Starts a scan and reflects what the server said.
  *
  * A fresh idempotency key is generated per click, so a double-click cannot queue
- * two crawls, and a 409 is shown as the real reason (a scan is already running)
- * rather than a generic failure.
+ * two crawls, and a refusal is shown as its real reason (a scan is already
+ * running, the address is private, …) in the reader's language.
  */
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Icon } from "../../components/icons";
+import { apiErrorMessage, callApi } from "../../lib/errors-ui";
+import type { Locale } from "../../lib/i18n";
 
 export function ScanButton({
   projectId,
+  locale,
   label,
   activeLabel,
 }: {
   projectId: string;
+  locale: Locale;
   label: string;
   activeLabel: string;
 }) {
@@ -28,36 +32,23 @@ export function ScanButton({
   async function start() {
     setBusy(true);
     setMessage(null);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/scans`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
-        },
-        body: JSON.stringify({ trigger: "MANUAL" }),
-      });
-      const data = (await res.json()) as {
-        error?: { message?: string };
-        run?: { id: string };
-        replayed?: boolean;
-      };
-      if (!res.ok) {
-        setMessage(data.error?.message ?? `HTTP ${res.status}`);
-        return;
-      }
-      startTransition(() => router.refresh());
-    } catch (err) {
-      setMessage((err as Error).message);
-    } finally {
-      setBusy(false);
+    const result = await callApi(`/api/projects/${projectId}/scans`, {
+      method: "POST",
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: { trigger: "MANUAL" },
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setMessage(apiErrorMessage(locale, result.failure));
+      return;
     }
+    startTransition(() => router.refresh());
   }
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       {message && (
-        <span className="pill warn" role="status">
+        <span className="pill warn" role="status" style={{ whiteSpace: "normal" }}>
           <Icon name="alert" />
           {message}
         </span>

@@ -1,43 +1,54 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Icon } from "../../../components/icons";
+import { apiErrorMessage, callApi } from "../../../lib/errors-ui";
+import type { Locale } from "../../../lib/i18n";
 
-export function SyncButton({ label, busyLabel }: { label: string; busyLabel: string }) {
+export function SyncButton({
+  projectId,
+  locale,
+  label,
+  busyLabel,
+}: {
+  projectId: string;
+  locale: Locale;
+  label: string;
+  busyLabel: string;
+}) {
   const router = useRouter();
+  const [refreshing, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function sync() {
     setBusy(true);
     setMessage(null);
-    try {
-      const res = await fetch("/api/opportunities/sync", { method: "POST" });
-      const data = (await res.json()) as { error?: { message?: string }; synced?: number };
-      if (!res.ok) {
-        setMessage(data.error?.message ?? `HTTP ${res.status}`);
-        return;
-      }
-      router.refresh();
-    } catch (err) {
-      setMessage((err as Error).message);
-    } finally {
-      setBusy(false);
+    // The project on screen, not whichever one the server would default to.
+    const result = await callApi(`/api/opportunities/sync?projectId=${encodeURIComponent(projectId)}`, {
+      method: "POST",
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setMessage(apiErrorMessage(locale, result.failure));
+      return;
     }
+    startTransition(() => router.refresh());
   }
 
+  const working = busy || refreshing;
   return (
-    <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+    <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       {message && (
-        <span className="pill warn" role="status">
+        <span className="pill warn" role="status" style={{ whiteSpace: "normal" }}>
           <Icon name="alert" />
           {message}
         </span>
       )}
-      <button className="btn ghost" onClick={sync} disabled={busy}>
+      <button className="btn ghost" onClick={sync} disabled={working}>
         <Icon name="link" />
-        {busy ? busyLabel : label}
+        {working ? busyLabel : label}
       </button>
     </span>
   );

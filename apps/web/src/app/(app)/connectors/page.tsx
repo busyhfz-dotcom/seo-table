@@ -2,11 +2,12 @@ import { TopBar } from "../../../components/shell";
 import { Card, Empty, Note, Status } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
-import { defaultProject, getProject, listConnectors } from "../../../lib/queries";
+import { listConnectors } from "../../../lib/queries";
+import { connectorLabel } from "../../../lib/labels";
+import { can } from "@seo/core";
 import { relative } from "../../../lib/format";
 import { AWAITING_OAUTH_APP, CONNECTOR_KINDS } from "@seo/connectors";
 import { WordPressForm } from "./wordpress-form";
-import { sessionCan } from "../../../lib/auth";
 import { connectorMessage, connectorNotes } from "../../../lib/connector-messages";
 
 export const dynamic = "force-dynamic";
@@ -34,22 +35,13 @@ const DESCRIPTIONS: Record<string, { fa: string; en: string }> = {
   },
 };
 
-export default async function ConnectorsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>;
-}) {
-  const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
-
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+export default async function ConnectorsPage() {
+  const { t, locale, session, project } = await pageContext();
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("connectors")} />
+        <TopBar title={t("connectors")} />
         <div className="view">
           <Card title={t("connectors")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -59,15 +51,13 @@ export default async function ConnectorsPage({
     );
   }
 
-  const [rows, canWrite] = await Promise.all([
-    listConnectors(project.id),
-    sessionCan("connector:write"),
-  ]);
+  const rows = await listConnectors(project.id);
+  const canWrite = can(session.role, "connector:write");
   const byKind = new Map(rows.map((r) => [r.kind, r]));
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("connectors")} />
+      <TopBar title={t("connectors")} />
       <div className="view">
         <Note tone="lock" icon="info">
           {t("conn_note")}
@@ -102,7 +92,7 @@ export default async function ConnectorsPage({
                       {kind.slice(0, 2)}
                     </span>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 500 }}>{label(kind)}</div>
+                      <div style={{ fontWeight: 500 }}>{connectorLabel(kind)}</div>
                       <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
                         {row?.lastSyncAt ? `${t("last_sync")} · ${relative(row.lastSyncAt, locale)}` : "—"}
                       </div>
@@ -136,6 +126,8 @@ export default async function ConnectorsPage({
                   {kind === "WORDPRESS" && canWrite && (
                     <WordPressForm
                       projectId={project.id}
+                      siteUrl={project.baseUrl}
+                      locale={locale}
                       connected={status === "CONNECTED"}
                       labels={{
                         siteUrl: t("site_url"),
@@ -180,17 +172,5 @@ export default async function ConnectorsPage({
         </Card>
       </div>
     </>
-  );
-}
-
-function label(kind: string): string {
-  return (
-    {
-      WORDPRESS: "WordPress",
-      SEARCH_CONSOLE: "Search Console",
-      GA4: "GA4",
-      INSTAGRAM: "Instagram",
-      YOUTUBE: "YouTube",
-    }[kind] ?? kind
   );
 }

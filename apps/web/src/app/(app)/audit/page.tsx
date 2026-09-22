@@ -2,15 +2,9 @@ import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { Bar, Card, Empty, Note, Status, Table } from "../../../components/ui";
 import { pageContext } from "../../../lib/page";
-import {
-  defaultProject,
-  getProject,
-  getRun,
-  issueCountsByUrl,
-  latestRunFor,
-  runPages,
-} from "../../../lib/queries";
+import { getRun, issueCountsByUrl, latestRunFor, runPages } from "../../../lib/queries";
 import { dateTime, duration, num, pathOf, relative } from "../../../lib/format";
+import { categoryLabel, noindexLabel, readableUrl, ruleDescription, ruleName, runErrorLabel } from "../../../lib/labels";
 import { ALL_RULES } from "@seo/core";
 import { ScanButton } from "../scan-button";
 import { CancelScanButton } from "./cancel-button";
@@ -25,17 +19,18 @@ export default async function AuditPage({
   searchParams: Promise<{ run?: string; project?: string; tab?: string; page?: string }>;
 }) {
   const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
+  const { t, locale, session, project: contextProject } = await pageContext();
   const tab: Tab = params.tab === "pages" ? "pages" : params.tab === "rules" ? "rules" : "overview";
 
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+  // A run named in the URL decides the project: a link to a run of another
+  // project must show that run with its own project, not the default one.
+  const requestedRun = params.run ? await getRun(session.orgId, params.run) : null;
+  const project = requestedRun?.project ?? contextProject;
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("audit")} />
+        <TopBar title={t("audit")} />
         <div className="view">
           <Card title={t("audit")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -45,22 +40,19 @@ export default async function AuditPage({
     );
   }
 
-  const run = params.run
-    ? await getRun(session.orgId, params.run)
-    : await (async () => {
-        const latest = await latestRunFor(project.id);
-        return latest ? await getRun(session.orgId, latest.id) : null;
-      })();
+  const run =
+    requestedRun ??
+    (await (async () => {
+      const latest = await latestRunFor(project.id);
+      return latest ? await getRun(session.orgId, latest.id) : null;
+    })());
 
   if (!run) {
     return (
       <>
         <TopBar
-          t={t}
-          locale={locale}
-          pathname={pathname}
           title={t("audit")}
-          right={<ScanButton projectId={project.id} label={t("scan")} activeLabel={t("st_running")} />}
+          right={<ScanButton projectId={project.id} locale={locale} label={t("scan")} activeLabel={t("st_running")} />}
         />
         <div className="view">
           <Card title={t("audit")} sub={project.name}>
@@ -90,21 +82,22 @@ export default async function AuditPage({
       }
     | null;
 
-  const tabHref = (next: Tab) =>
-    `/audit?run=${run.id}${next === "overview" ? "" : `&tab=${next}`}`;
+  const auditHref = (patch: { tab?: Tab; page?: number }) => {
+    const sp = new URLSearchParams({ project: project.id, run: run.id });
+    if (patch.tab && patch.tab !== "overview") sp.set("tab", patch.tab);
+    if (patch.page && patch.page > 1) sp.set("page", String(patch.page));
+    return `/audit?${sp.toString()}`;
+  };
 
   return (
     <>
       <TopBar
-        t={t}
-        locale={locale}
-        pathname={pathname}
         title={t("audit")}
         right={
           active ? (
-            <CancelScanButton runId={run.id} label={t("stop_scan")} />
+            <CancelScanButton runId={run.id} locale={locale} label={t("stop_scan")} />
           ) : (
-            <ScanButton projectId={project.id} label={t("scan")} activeLabel={t("st_running")} />
+            <ScanButton projectId={project.id} locale={locale} label={t("scan")} activeLabel={t("st_running")} />
           )
         }
       />
@@ -123,12 +116,11 @@ export default async function AuditPage({
               >
                 {t("run_header")}
               </div>
-              <div className="path" style={{ fontSize: 15, marginTop: 4 }}>
+              <div className="path" dir="ltr" style={{ fontSize: 15, marginTop: 4 }}>
                 {run.id}
               </div>
             </div>
-            <div style={{ width: 1, height: 38, background: "var(--border)" }} />
-            <dl className="kv" style={{ gridTemplateColumns: "auto auto auto auto auto auto", alignItems: "center" }}>
+            <dl className="kv wide">
               <dt>{t("status")}</dt>
               <dd>
                 <Status value={run.status} t={t} />
@@ -156,20 +148,23 @@ export default async function AuditPage({
 
         {run.error && (
           <Note tone="crit" icon="alert">
-            {run.errorCode ? `${run.errorCode}: ` : ""}
-            {run.error}
+            <div>{runErrorLabel(run.errorCode ?? "", locale)}</div>
+            {/* The worker's own message, for whoever debugs it; not translated. */}
+            <div className="path" dir="ltr" style={{ marginTop: 4 }}>
+              {run.error}
+            </div>
           </Note>
         )}
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div className="seg" role="group">
-            <Link href={tabHref("overview")} aria-current={tab === "overview"}>
+            <Link href={auditHref({ tab: "overview" })} aria-current={tab === "overview"}>
               {t("tab_over")}
             </Link>
-            <Link href={tabHref("pages")} aria-current={tab === "pages"}>
+            <Link href={auditHref({ tab: "pages" })} aria-current={tab === "pages"}>
               {t("tab_pages")}
             </Link>
-            <Link href={tabHref("rules")} aria-current={tab === "rules"}>
+            <Link href={auditHref({ tab: "rules" })} aria-current={tab === "rules"}>
               {t("tab_rules")}
             </Link>
           </div>
@@ -183,7 +178,7 @@ export default async function AuditPage({
                   {breakdown.byCategory.slice(0, 8).map((c) => (
                     <div key={c.category}>
                       <div style={{ display: "flex", gap: 8, fontSize: 12.5, marginBottom: 5 }}>
-                        <span>{c.category}</span>
+                        <span>{categoryLabel(c.category, locale)}</span>
                         <span className="spacer" />
                         <span className="num" style={{ color: "var(--ink-3)" }}>
                           −{num(c.penalty, locale)}
@@ -208,7 +203,7 @@ export default async function AuditPage({
                   {breakdown.worstPages.slice(0, 8).map((p) => (
                     <tr key={p.url}>
                       <td className="path" dir="ltr">
-                        {pathOf(p.url)}
+                        {readableUrl(pathOf(p.url))}
                       </td>
                       <td className="tnum">{num(p.score, locale)}</td>
                     </tr>
@@ -245,10 +240,10 @@ export default async function AuditPage({
                   {pages.rows.map((p) => (
                     <tr key={p.id}>
                       <td className="path" dir="ltr">
-                        {pathOf(p.normalizedUrl)}
+                        {readableUrl(pathOf(p.normalizedUrl))}
                         {p.statusCode !== 200 && (
                           <span className="pill crit" style={{ marginInlineStart: 8 }}>
-                            {p.statusCode === 0 ? "ERR" : p.statusCode}
+                            {p.statusCode === 0 ? t("st_error") : num(p.statusCode, locale)}
                           </span>
                         )}
                       </td>
@@ -268,7 +263,7 @@ export default async function AuditPage({
                         {p.indexable ? (
                           <span className="pill ok">{t("indexable")}</span>
                         ) : (
-                          <span className="pill mute">{p.noindexReason ?? "—"}</span>
+                          <span className="pill mute">{noindexLabel(p.noindexReason, locale)}</span>
                         )}
                       </td>
                       <td className="tnum">{num(issueCounts.get(p.normalizedUrl) ?? 0, locale)}</td>
@@ -286,7 +281,7 @@ export default async function AuditPage({
                     }}
                   >
                     {pageNo > 1 && (
-                      <Link className="btn ghost sm" href={`/audit?run=${run.id}&tab=pages&page=${pageNo - 1}`}>
+                      <Link className="btn ghost sm" href={auditHref({ tab: "pages", page: pageNo - 1 })}>
                         ‹
                       </Link>
                     )}
@@ -294,7 +289,7 @@ export default async function AuditPage({
                       {num(pageNo, locale)} / {num(Math.ceil(pages.total / perPage), locale)}
                     </span>
                     {pageNo * perPage < pages.total && (
-                      <Link className="btn ghost sm" href={`/audit?run=${run.id}&tab=pages&page=${pageNo + 1}`}>
+                      <Link className="btn ghost sm" href={auditHref({ tab: "pages", page: pageNo + 1 })}>
                         ›
                       </Link>
                     )}
@@ -320,10 +315,15 @@ export default async function AuditPage({
                 return (
                   <tr key={rule.id}>
                     <td>
-                      <div className="path">{rule.id}</div>
-                      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{rule.description}</div>
+                      <div style={{ fontWeight: 500 }}>{ruleName(rule.id, locale)}</div>
+                      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                        {ruleDescription(rule.id, rule.description, locale)}
+                      </div>
+                      <div className="path" dir="ltr">
+                        {rule.id}
+                      </div>
                     </td>
-                    <td style={{ color: "var(--ink-2)" }}>{rule.category}</td>
+                    <td style={{ color: "var(--ink-2)" }}>{categoryLabel(rule.category, locale)}</td>
                     <td className="tnum">{num(stat?.pages ?? 0, locale)}</td>
                     <td className="tnum">{num(stat?.count ?? 0, locale)}</td>
                   </tr>

@@ -9,18 +9,18 @@ import { num, relative } from "../../../lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function ProjectsPage() {
-  const { t, locale, pathname, session } = await pageContext();
+  const { t, locale, session } = await pageContext();
   const projects = await listProjects(session.orgId);
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("projects")} />
+      <TopBar title={t("projects")} />
       <div className="view">
         <Card
           title={t("projects")}
           sub={`${num(projects.length, locale)}`}
           right={
-            <Link className="btn primary" href="/onboarding">
+            <Link className="btn primary" href="/onboarding?new=1">
               <Icon name="plus" />
               {t("new_project")}
             </Link>
@@ -44,11 +44,15 @@ export default async function ProjectsPage() {
               {projects.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{p.name}</div>
-                    <div className="path">{p.baseUrl.replace(/^https?:\/\//, "")}</div>
+                    <Link href={`/?project=${p.id}`} style={{ fontWeight: 500 }}>
+                      {p.name}
+                    </Link>
+                    <div className="path" dir="ltr">
+                      {p.baseUrl.replace(/^https?:\/\//, "")}
+                    </div>
                   </td>
                   <td>
-                    <span className="pill mute">{p.locale === "fa" ? "فارسی · RTL" : "EN · LTR"}</span>
+                    <span className="pill mute">{t(p.locale === "fa" ? "lang_fa" : "lang_en")}</span>
                   </td>
                   <td className="tnum">{p.score === null ? "—" : num(p.score, locale)}</td>
                   <td className="tnum">{num(p.openIssues, locale)}</td>
@@ -57,7 +61,7 @@ export default async function ProjectsPage() {
                     {p.lastRun ? relative(p.lastRun.queuedAt, locale) : "—"}
                   </td>
                   <td style={{ textAlign: "end" }}>
-                    <Link className="btn ghost sm" href={`/audit?project=${p.id}`}>
+                    <Link className="btn ghost sm" href={`/audit?project=${p.id}`} aria-label={`${t("details")}: ${p.name}`}>
                       {t("details")}
                     </Link>
                   </td>

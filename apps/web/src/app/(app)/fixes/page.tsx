@@ -1,33 +1,28 @@
 import { TopBar } from "../../../components/shell";
-import { fixTitle, fixWhy } from "../../../lib/labels";
+import { fixTitle, fixWhy, readableUrl, resultCodeLabel, ruleName } from "../../../lib/labels";
 import { Card, Diff, Empty, Note, RiskPill, Status } from "../../../components/ui";
+import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
-import { defaultProject, getProject, listFixes } from "../../../lib/queries";
-import { num, relative } from "../../../lib/format";
-import { policyLimits, requiresApproval } from "@seo/core";
+import { listFixes } from "../../../lib/queries";
+import { latestLiveExecutions } from "../../../lib/views";
+import { num, pathOf, relative } from "../../../lib/format";
+import { can, policyLimits, requiresApproval } from "@seo/core";
+import type { Locale, T } from "../../../lib/i18n";
 import { FixActions } from "./actions";
-import { sessionCan } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
 type Change = { url: string; field: string; before: string | null; after: string; selector?: string };
+type WriteResult = { url: string; field: string; ok: boolean; code?: string; previous?: string | null };
+type DryRun = { at?: string; applied?: number; failed?: number; skipped?: number; results?: WriteResult[] };
 
-export default async function FixesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>;
-}) {
-  const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
-
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+export default async function FixesPage() {
+  const { t, locale, session, project } = await pageContext();
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("fixes")} />
+        <TopBar title={t("fixes")} />
         <div className="view">
           <Card title={t("fixes")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -37,15 +32,18 @@ export default async function FixesPage({
     );
   }
 
-  const [fixes, canApply] = await Promise.all([
-    listFixes(project.id, ["DRAFT", "APPROVED", "APPLYING", "APPLIED", "FAILED", "ROLLED_BACK"]),
-    sessionCan("fix:apply_low_risk"),
-  ]);
+  const fixes = await listFixes(project.id, ["DRAFT", "APPROVED", "APPLYING", "APPLIED", "FAILED", "ROLLED_BACK"]);
+  const executions = await latestLiveExecutions(fixes.map((f) => f.id));
   const limits = policyLimits();
+  const perms = {
+    propose: can(session.role, "fix:propose"),
+    apply: can(session.role, "fix:apply_low_risk"),
+    rollback: can(session.role, "fix:rollback"),
+  };
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("fixes")} />
+      <TopBar title={t("fixes")} />
       <div className="view">
         <Note tone="lock" icon="shield">
           {t("fix_policy", { n: num(limits.maxChangesPerExecution, locale) })}
@@ -61,7 +59,15 @@ export default async function FixesPage({
               const changes = (fix.changes as Change[]) ?? [];
               const sample = changes[0];
               const needsApproval = requiresApproval(fix.action, fix.risk);
-              const hasDryRun = Boolean(fix.dryRun);
+              const dryRun = (fix.dryRun ?? null) as DryRun | null;
+              const execution = executions.get(fix.id);
+              const canRollback =
+                (fix.status === "APPLIED" || fix.status === "FAILED") &&
+                execution !== undefined &&
+                execution.rolledBackAt === null &&
+                (execution.status === "APPLIED" || execution.status === "FAILED") &&
+                execution.appliedCount > 0;
+              const why = fixWhy(fix.action, fix.rationale, locale);
               return (
                 <section className="card" key={fix.id}>
                   <header>
@@ -76,14 +82,10 @@ export default async function FixesPage({
                       <span className="num" style={{ color: "var(--ink)" }}>
                         {num(fix.targetCount, locale)}
                       </span>{" "}
-                      {t("pages")} · <span className="path">{fix.ruleId}</span>
+                      {t("pages")} · {ruleName(fix.ruleId, locale)}
                     </div>
 
-                    {fixWhy(fix.action, fix.rationale, locale) && (
-                      <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginBottom: 12 }}>
-                        {fixWhy(fix.action, fix.rationale, locale)}
-                      </p>
-                    )}
+                    {why && <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginBottom: 12 }}>{why}</p>}
 
                     {sample && <Diff before={sample.before} after={sample.after} />}
                     {changes.length > 1 && (
@@ -100,20 +102,59 @@ export default async function FixesPage({
                       </div>
                     )}
 
+                    {dryRun?.at && fix.status !== "APPLIED" && fix.status !== "ROLLED_BACK" && (
+                      <Outcome
+                        title={t("dry_run_result")}
+                        at={dryRun.at}
+                        summary={t("dry_run_summary", {
+                          ok: num(dryRun.applied ?? 0, locale),
+                          failed: num(dryRun.failed ?? 0, locale),
+                        })}
+                        results={dryRun.results ?? []}
+                        skipped={dryRun.skipped ?? 0}
+                        locale={locale}
+                        t={t}
+                      />
+                    )}
+
+                    {execution && (fix.status === "FAILED" || execution.error) && execution.rolledBackAt === null && (
+                      <Outcome
+                        title={t("last_apply_result")}
+                        at={execution.finishedAt?.toISOString() ?? null}
+                        summary={t("apply_summary", {
+                          ok: num(execution.appliedCount, locale),
+                          failed: num(execution.failedCount, locale),
+                        })}
+                        results={((execution.results as WriteResult[] | null) ?? []).filter((r) => !r.ok)}
+                        skipped={0}
+                        locale={locale}
+                        t={t}
+                        tone="crit"
+                      />
+                    )}
+
                     <div style={{ marginTop: 14 }}>
                       <FixActions
                         id={fix.id}
                         status={fix.status}
                         needsApproval={needsApproval}
                         approved={fix.decision === "APPROVED"}
-                        hasDryRun={hasDryRun}
-                        canApply={canApply}
+                        dryRunAt={dryRun?.at ?? null}
+                        canRollback={canRollback}
+                        perms={perms}
+                        locale={locale}
                         labels={{
                           dryRun: t("dry_run"),
                           apply: t("apply"),
+                          retry: t("retry"),
                           rollback: t("rollback"),
                           waiting: t("st_awaiting_approval"),
                           forbidden: t("err_forbidden"),
+                          dryRunFirst: t("dry_run_first"),
+                          queued: t("fix_queued"),
+                          slow: t("fix_slow"),
+                          rolledBack: t("rolled_back_n"),
+                          rollbackPartial: t("rollback_partial"),
                         }}
                       />
                     </div>
@@ -129,5 +170,73 @@ export default async function FixesPage({
         )}
       </div>
     </>
+  );
+}
+
+/** What a dry run or an apply did, change by change, with drift called out. */
+function Outcome({
+  title,
+  at,
+  summary,
+  results,
+  skipped,
+  locale,
+  t,
+  tone,
+}: {
+  title: string;
+  at: string | null;
+  summary: string;
+  results: WriteResult[];
+  skipped: number;
+  locale: Locale;
+  t: T;
+  tone?: "crit";
+}) {
+  const shown = results.slice(0, 6);
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "10px 12px",
+        borderRadius: "var(--r)",
+        background: "var(--surface-2)",
+        boxShadow: `inset 0 0 0 1px ${tone === "crit" ? "rgba(240, 101, 94, 0.3)" : "var(--border)"}`,
+        fontSize: 12.5,
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: shown.length ? 6 : 0 }}>
+        <b style={{ fontWeight: 500 }}>{title}</b>
+        {at && <span style={{ color: "var(--ink-3)" }}>{relative(at, locale)}</span>}
+        <span className="spacer" />
+        <span style={{ color: "var(--ink-2)" }}>{summary}</span>
+      </div>
+      {shown.length > 0 && (
+        <ul className="plain" style={{ paddingInlineStart: 0, listStyle: "none" }}>
+          {shown.map((r, i) => (
+            <li key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span className={`pill ${r.ok ? "ok" : r.code === "changed_since_scan" ? "warn" : "crit"}`}>
+                <Icon name={r.ok ? "check" : "alert"} />
+                {resultCodeLabel(r.code, r.ok, locale)}
+              </span>
+              <span className="path" dir="ltr">
+                {readableUrl(pathOf(r.url))}
+              </span>
+              {r.code === "changed_since_scan" && r.previous !== undefined && (
+                <span style={{ color: "var(--ink-3)", width: "100%" }}>
+                  {t("current_value")}: <span dir="auto">{readableUrl(r.previous ?? null) ?? "∅"}</span>
+                </span>
+              )}
+            </li>
+          ))}
+          {results.length > shown.length && (
+            <li style={{ color: "var(--ink-3)" }}>+{num(results.length - shown.length, locale)}</li>
+          )}
+        </ul>
+      )}
+      {skipped > 0 && (
+        <div style={{ color: "var(--ink-3)", marginTop: 4 }}>{t("skipped_by_cap", { n: num(skipped, locale) })}</div>
+      )}
+    </div>
   );
 }

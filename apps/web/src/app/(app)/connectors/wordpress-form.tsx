@@ -6,15 +6,28 @@
  * and what the site supports.
  */
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Icon } from "../../../components/icons";
+import { apiErrorMessage, callApi } from "../../../lib/errors-ui";
+import type { Locale } from "../../../lib/i18n";
+
+type ConnectResponse = {
+  status?: string;
+  /** Already in the reader's language (the server localizes connector outcomes). */
+  message?: string;
+  capabilities?: { notes?: string[] } | null;
+};
 
 export function WordPressForm({
   projectId,
+  siteUrl,
+  locale,
   connected,
   labels,
 }: {
   projectId: string;
+  siteUrl: string;
+  locale: Locale;
   connected: boolean;
   labels: {
     siteUrl: string;
@@ -26,6 +39,7 @@ export function WordPressForm({
   };
 }) {
   const router = useRouter();
+  const [refreshing, startTransition] = useTransition();
   const [open, setOpen] = useState(!connected);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string; notes?: string[] } | null>(null);
@@ -35,40 +49,32 @@ export function WordPressForm({
     const form = new FormData(event.currentTarget);
     setBusy(true);
     setResult(null);
-    try {
-      const res = await fetch(`/api/connectors/wordpress?projectId=${projectId}`, {
+    const response = await callApi<ConnectResponse>(
+      `/api/connectors/wordpress?projectId=${encodeURIComponent(projectId)}`,
+      {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: {
           kind: "WORDPRESS",
           siteUrl: String(form.get("siteUrl") ?? ""),
           username: String(form.get("username") ?? ""),
           applicationPassword: String(form.get("applicationPassword") ?? ""),
-        }),
-      });
-      const data = (await res.json()) as {
-        error?: { message?: string };
-        status?: string;
-        message?: string;
-        capabilities?: { notes?: string[] };
-      };
-      if (!res.ok) {
-        setResult({ ok: false, message: data.error?.message ?? `HTTP ${res.status}` });
-        return;
-      }
-      setResult({
-        ok: data.status === "CONNECTED",
-        message: data.message ?? "",
-        notes: data.capabilities?.notes ?? [],
-      });
-      if (data.status === "CONNECTED") {
-        setOpen(false);
-        router.refresh();
-      }
-    } catch (err) {
-      setResult({ ok: false, message: (err as Error).message });
-    } finally {
-      setBusy(false);
+        },
+      },
+    );
+    setBusy(false);
+    if (!response.ok) {
+      setResult({ ok: false, message: apiErrorMessage(locale, response.failure) });
+      return;
+    }
+    const data = response.data;
+    setResult({
+      ok: data.status === "CONNECTED",
+      message: data.message ?? "",
+      notes: data.capabilities?.notes ?? [],
+    });
+    if (data.status === "CONNECTED") {
+      setOpen(false);
+      startTransition(() => router.refresh());
     }
   }
 
@@ -87,7 +93,15 @@ export function WordPressForm({
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
       <label className="field">
         <span>{labels.siteUrl}</span>
-        <input id="wp-site" name="siteUrl" type="url" required dir="ltr" placeholder="https://example.ir" />
+        <input
+          id="wp-site"
+          name="siteUrl"
+          type="url"
+          required
+          dir="ltr"
+          defaultValue={siteUrl}
+          placeholder="https://example.ir"
+        />
       </label>
       <label className="field">
         <span>{labels.username}</span>
@@ -123,9 +137,9 @@ export function WordPressForm({
       )}
 
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn primary" type="submit" disabled={busy}>
+        <button className="btn primary" type="submit" disabled={busy || refreshing}>
           <Icon name="link" />
-          {busy ? "…" : labels.test}
+          {labels.test}
         </button>
       </div>
     </form>

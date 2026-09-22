@@ -3,10 +3,14 @@
 /**
  * The secret appears exactly once, in the response to its own creation, and is
  * held only in this component's state until the page is left. Nothing can read it
- * back afterwards — the server stores a hash.
+ * back afterwards — the server stores a hash. Revoking keeps the row (marked
+ * revoked) so the audit trail still says which key did what.
  */
 import { useEffect, useState } from "react";
 import { Icon } from "../../../components/icons";
+import { apiErrorMessage, callApi } from "../../../lib/errors-ui";
+import { dateTime } from "../../../lib/format";
+import type { Locale } from "../../../lib/i18n";
 
 type Key = {
   id: string;
@@ -17,62 +21,78 @@ type Key = {
   revokedAt: string | null;
 };
 
-export function ApiKeys({
-  labels,
-}: {
-  labels: {
-    title: string;
-    create: string;
-    name: string;
-    once: string;
-    revoke: string;
-    empty: string;
-    note: string;
-  };
-}) {
+type Labels = {
+  title: string;
+  create: string;
+  name: string;
+  key: string;
+  created: string;
+  lastUsed: string;
+  never: string;
+  once: string;
+  revoke: string;
+  revoked: string;
+  confirm: string;
+  cancel: string;
+  empty: string;
+  note: string;
+};
+
+export function ApiKeys({ locale, labels }: { locale: Locale; labels: Labels }) {
   const [keys, setKeys] = useState<Key[] | null>(null);
   const [fresh, setFresh] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    const res = await fetch("/api/keys");
-    if (!res.ok) {
-      setError(`HTTP ${res.status}`);
+    const result = await callApi<{ keys: Key[] }>("/api/keys");
+    if (!result.ok) {
+      setError(apiErrorMessage(locale, result.failure));
       setKeys([]);
       return;
     }
-    const data = (await res.json()) as { keys: Key[] };
-    setKeys(data.keys);
+    setKeys(result.data.keys);
   }
 
   useEffect(() => {
     void load();
+    // Loaded once on mount; later changes reload explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || busy) return;
     setBusy(true);
     setError(null);
-    try {
-      const res = await fetch("/api/keys", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const data = (await res.json()) as { error?: { message?: string }; secret?: string };
-      if (!res.ok) {
-        setError(data.error?.message ?? `HTTP ${res.status}`);
-        return;
-      }
-      setFresh(data.secret ?? null);
-      setName("");
-      await load();
-    } finally {
+    const result = await callApi<{ secret?: string }>("/api/keys", { method: "POST", body: { name } });
+    if (!result.ok) {
+      setError(apiErrorMessage(locale, result.failure));
       setBusy(false);
+      return;
     }
+    setFresh(result.data.secret ?? null);
+    setName("");
+    await load();
+    setBusy(false);
+  }
+
+  async function revoke(id: string) {
+    setBusy(true);
+    setError(null);
+    const result = await callApi<{ id: string; revokedAt: string | null }>(`/api/keys/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    setConfirming(null);
+    if (!result.ok) {
+      setError(apiErrorMessage(locale, result.failure));
+      setBusy(false);
+      return;
+    }
+    await load();
+    setBusy(false);
   }
 
   return (
@@ -89,7 +109,7 @@ export function ApiKeys({
         {fresh && (
           <div className="note acc" style={{ marginBottom: 14 }}>
             <Icon name="key" />
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ marginBottom: 6 }}>{labels.once}</div>
               <code className="path" style={{ userSelect: "all", wordBreak: "break-all" }} dir="ltr">
                 {fresh}
@@ -99,13 +119,13 @@ export function ApiKeys({
         )}
 
         {error && (
-          <div className="note crit" style={{ marginBottom: 14 }}>
+          <div className="note crit" style={{ marginBottom: 14 }} role="status">
             <Icon name="alert" />
             <div>{error}</div>
           </div>
         )}
 
-        <form onSubmit={create} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 16 }}>
+        <form onSubmit={create} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
           <label className="field" style={{ flex: "1 1 200px" }}>
             <span>{labels.name}</span>
             <input id="key-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
@@ -115,41 +135,76 @@ export function ApiKeys({
             {labels.create}
           </button>
         </form>
-
-        {keys === null ? (
-          <div style={{ color: "var(--ink-3)", fontSize: 12.5 }}>…</div>
-        ) : keys.length === 0 ? (
-          <div className="empty">
-            <Icon name="key" />
-            <div>{labels.empty}</div>
-          </div>
-        ) : (
-          <div className="tw">
-            <table>
-              <tbody>
-                {keys.map((k) => (
-                  <tr key={k.id}>
-                    <td>{k.name}</td>
-                    <td className="path" dir="ltr">
-                      {k.masked}
-                    </td>
-                    <td style={{ color: "var(--ink-3)", fontSize: 12 }}>
-                      {k.revokedAt ? (
-                        <span className="pill mute">
-                          <Icon name="x" />
-                          {labels.revoke}
-                        </span>
-                      ) : (
-                        new Date(k.createdAt).toISOString().slice(0, 10)
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
+
+      {keys === null ? (
+        <div className="body" style={{ color: "var(--ink-3)", fontSize: 12.5, paddingTop: 0 }}>
+          …
+        </div>
+      ) : keys.length === 0 ? (
+        <div className="empty">
+          <Icon name="key" />
+          <div>{labels.empty}</div>
+        </div>
+      ) : (
+        <div className="tw">
+          <table>
+            <thead>
+              <tr>
+                <th>{labels.name}</th>
+                <th>{labels.key}</th>
+                <th>{labels.created}</th>
+                <th>{labels.lastUsed}</th>
+                <th aria-label={labels.revoke} />
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((k) => (
+                <tr key={k.id} style={k.revokedAt ? { opacity: 0.6 } : undefined}>
+                  <td>{k.name}</td>
+                  <td className="path" dir="ltr">
+                    {k.masked}
+                  </td>
+                  <td style={{ color: "var(--ink-3)", fontSize: 12, whiteSpace: "nowrap" }}>
+                    {dateTime(k.createdAt, locale)}
+                  </td>
+                  <td style={{ color: "var(--ink-3)", fontSize: 12, whiteSpace: "nowrap" }}>
+                    {k.lastUsedAt ? dateTime(k.lastUsedAt, locale) : labels.never}
+                  </td>
+                  <td style={{ textAlign: "end", whiteSpace: "nowrap" }}>
+                    {k.revokedAt ? (
+                      <span className="pill mute" title={dateTime(k.revokedAt, locale)}>
+                        <Icon name="x" />
+                        {labels.revoked}
+                      </span>
+                    ) : confirming === k.id ? (
+                      <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{labels.confirm}</span>
+                        <button className="btn danger sm" onClick={() => revoke(k.id)} disabled={busy}>
+                          {labels.revoke}
+                        </button>
+                        <button className="btn ghost sm" onClick={() => setConfirming(null)} disabled={busy}>
+                          {labels.cancel}
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => setConfirming(k.id)}
+                        disabled={busy}
+                        aria-label={`${labels.revoke}: ${k.name}`}
+                      >
+                        <Icon name="x" />
+                        {labels.revoke}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

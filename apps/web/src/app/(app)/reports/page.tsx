@@ -1,9 +1,9 @@
 import { TopBar } from "../../../components/shell";
-import { ruleTitle } from "../../../lib/labels";
+import { categoryLabel, ruleTitle } from "../../../lib/labels";
 import { Card, Empty, Note, Sev, Status, Table } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
-import { dashboard, defaultProject, getProject, listIssues } from "../../../lib/queries";
+import { dashboard, listIssues } from "../../../lib/queries";
 import { dateTime, duration, num } from "../../../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -13,22 +13,13 @@ export const dynamic = "force-dynamic";
  * reports table to drift out of date: what you see is the current state of the
  * latest run, and the CSV endpoint exports exactly these rows.
  */
-export default async function ReportsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>;
-}) {
-  const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
-
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+export default async function ReportsPage() {
+  const { t, locale, session, project } = await pageContext();
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("reports")} />
+        <TopBar title={t("reports")} />
         <div className="view">
           <Card title={t("reports")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -48,9 +39,6 @@ export default async function ReportsPage({
   return (
     <>
       <TopBar
-        t={t}
-        locale={locale}
-        pathname={pathname}
         title={t("reports")}
         right={
           <a className="btn ghost" href={`/api/reports/issues.csv?projectId=${project.id}`}>
@@ -115,7 +103,9 @@ export default async function ReportsPage({
                   </td>
                   <td>
                     <div style={{ fontWeight: 500 }}>{ruleTitle(issue.ruleId, issue.title, locale)}</div>
-                    <div className="path">{issue.ruleId}</div>
+                    <div className="path" dir="ltr">
+                      {issue.ruleId}
+                    </div>
                   </td>
                   <td className="tnum">{num(issue.pageCount, locale)}</td>
                   <td className="tnum">{num(issue.occurrenceCount, locale)}</td>
@@ -141,7 +131,7 @@ export default async function ReportsPage({
               >
                 {breakdown.byCategory.map((c) => (
                   <tr key={c.category}>
-                    <td>{c.category}</td>
+                    <td>{categoryLabel(c.category, locale)}</td>
                     <td className="tnum">−{num(c.penalty, locale)}</td>
                     <td className="tnum">{num(c.issues, locale)}</td>
                   </tr>

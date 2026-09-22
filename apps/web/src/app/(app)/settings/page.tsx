@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { Card, Empty, Note, Table } from "../../../components/ui";
+import { Card, Empty, Note, RiskPill, Table } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
-import { defaultProject, getOrg, listAuditLog, orgMembers } from "../../../lib/queries";
+import { getOrg, listAuditLog, orgMembers } from "../../../lib/queries";
 import { dateTime, num, relative } from "../../../lib/format";
+import { actionLabel, roleLabel, targetTypeLabel } from "../../../lib/labels";
+import { describeAction } from "../../../lib/activity";
+import { usersByIds } from "../../../lib/views";
 import { describePolicy, permissionMatrix, can, type Permission } from "@seo/core";
 import { ApiKeys } from "./api-keys";
 
@@ -28,17 +31,17 @@ export default async function SettingsPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
+  const { t, locale, session, project } = await pageContext();
   const tab: Tab = (["general", "team", "safety", "keys", "log"] as const).includes(params.tab as Tab)
     ? (params.tab as Tab)
     : "general";
 
-  const [org, project] = await Promise.all([getOrg(session.orgId), defaultProject(session.orgId)]);
+  const org = await getOrg(session.orgId);
   const policy = describePolicy();
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("settings")} />
+      <TopBar title={t("settings")} />
       <div className="view">
         <div className="seg" role="group" style={{ alignSelf: "flex-start" }}>
           {(
@@ -62,13 +65,26 @@ export default async function SettingsPage({
               <dt>{locale === "fa" ? "سازمان" : "Organization"}</dt>
               <dd>{org?.name ?? "—"}</dd>
               <dt>{locale === "fa" ? "کاربر" : "Signed in as"}</dt>
-              <dd className="path">{session.email}</dd>
+              <dd className="path" dir="ltr">
+                {session.email}
+              </dd>
               <dt>{t("your_role")}</dt>
               <dd>
-                <span className="pill acc">{session.role}</span>
+                <span className="pill acc">{roleLabel(session.role, locale)}</span>
               </dd>
-              <dt>{locale === "fa" ? "پروژه پیش‌فرض" : "Default project"}</dt>
-              <dd>{project ? `${project.name} · ${project.baseUrl}` : "—"}</dd>
+              <dt>{locale === "fa" ? "پروژه" : "Project"}</dt>
+              <dd>
+                {project ? (
+                  <>
+                    {project.name} ·{" "}
+                    <span className="path" dir="ltr">
+                      {project.baseUrl}
+                    </span>
+                  </>
+                ) : (
+                  "—"
+                )}
+              </dd>
               <dt>{locale === "fa" ? "زبان رابط" : "Interface language"}</dt>
               <dd>{locale === "fa" ? "فارسی (RTL)" : "English (LTR)"}</dd>
               {project && (
@@ -95,7 +111,9 @@ export default async function SettingsPage({
                 {permissionMatrix().map((row) => (
                   <tr key={row.role}>
                     <td>
-                      <span className={`pill ${row.role === "OWNER" ? "acc" : "mute"}`}>{row.role}</span>
+                      <span className={`pill ${row.role === "OWNER" ? "acc" : "mute"}`}>
+                        {roleLabel(row.role, locale)}
+                      </span>
                     </td>
                     {SHOWN_PERMISSIONS.map((p) => (
                       <td key={p} style={{ textAlign: "end" }}>
@@ -125,10 +143,12 @@ export default async function SettingsPage({
               >
                 {(await orgMembers(session.orgId)).map((m) => (
                   <tr key={m.id}>
-                    <td className="path">{m.email}</td>
+                    <td className="path" dir="ltr">
+                      {m.email}
+                    </td>
                     <td>{m.name ?? "—"}</td>
                     <td>
-                      <span className={`pill ${m.role === "OWNER" ? "acc" : "mute"}`}>{m.role}</span>
+                      <span className={`pill ${m.role === "OWNER" ? "acc" : "mute"}`}>{roleLabel(m.role, locale)}</span>
                     </td>
                   </tr>
                 ))}
@@ -167,18 +187,16 @@ export default async function SettingsPage({
                 {policy.tiers.map((tier) => (
                   <tr key={tier.risk}>
                     <td>
-                      <span
-                        className={`pill ${tier.risk === "LOW" ? "ok" : tier.risk === "SENSITIVE" ? "warn" : "crit"}`}
-                      >
-                        {tier.risk}
-                      </span>
+                      <RiskPill risk={tier.risk} t={t} />
                     </td>
-                    <td style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {tier.actions.map((a) => (
-                        <span key={a} className="pill mute">
-                          {a}
-                        </span>
-                      ))}
+                    <td>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {tier.actions.map((a) => (
+                          <span key={a} className="pill mute">
+                            {actionLabel(a, locale)}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td>
                       {tier.autoApply ? (
@@ -203,7 +221,7 @@ export default async function SettingsPage({
                 {policy.neverWithoutApproval.map((a) => (
                   <span key={a} className="pill crit">
                     <Icon name="lock" />
-                    {a}
+                    {actionLabel(a, locale)}
                   </span>
                 ))}
               </div>
@@ -216,65 +234,102 @@ export default async function SettingsPage({
           </>
         )}
 
-        {tab === "keys" && (
-          <ApiKeys
-            labels={{
-              title: t("s_keys"),
-              create: locale === "fa" ? "کلید جدید" : "New key",
-              name: locale === "fa" ? "نام" : "Name",
-              once:
-                locale === "fa"
-                  ? "این کلید فقط همین یک بار نمایش داده می‌شود. جایی امن ذخیره‌اش کن."
-                  : "This key is shown once and never again. Store it somewhere safe.",
-              revoke: locale === "fa" ? "لغو" : "Revoke",
-              empty: t("nothing_here"),
-              note:
-                locale === "fa"
-                  ? "کلید API با نقش EDITOR کار می‌کند: می‌تواند اسکن بزند و اصلاح کم‌ریسک اعمال کند، اما هرگز نمی‌تواند تغییر حساس را تأیید کند."
-                  : "An API key acts as an EDITOR: it can run scans and apply low-risk fixes, but it can never approve a sensitive change.",
-            }}
-          />
-        )}
+        {tab === "keys" &&
+          (can(session.role, "apikey:manage") ? (
+            <ApiKeys
+              locale={locale}
+              labels={{
+                title: t("s_keys"),
+                create: t("key_new"),
+                name: t("key_name"),
+                key: t("key_value"),
+                created: t("key_created"),
+                lastUsed: t("key_last_used"),
+                never: t("key_never"),
+                once: t("key_once"),
+                revoke: t("key_revoke"),
+                revoked: t("key_revoked"),
+                confirm: t("key_confirm"),
+                cancel: t("cancel"),
+                empty: t("nothing_here"),
+                note: t("key_note", { role: roleLabel("EDITOR", locale) }),
+              }}
+            />
+          ) : (
+            <Note icon="lock">
+              {t("err_forbidden")} — {t("your_role")}: {roleLabel(session.role, locale)}
+            </Note>
+          ))}
 
-        {tab === "log" && (
-          <Card
-            title={t("s_log")}
-            sub={locale === "fa" ? "تغییرناپذیر — فقط افزودنی" : "Immutable — append only"}
-            bare
-          >
-            {await (async () => {
-              const entries = await listAuditLog(session.orgId, 100);
-              if (entries.length === 0) return <Empty>{t("nothing_here")}</Empty>;
-              return (
-                <Table
-                  head={[{ label: t("time") }, { label: t("actor") }, { label: t("event") }, { label: "" }]}
-                >
-                  {entries.map((e) => (
-                    <tr key={e.id}>
-                      <td className="path" title={dateTime(e.createdAt, locale)}>
-                        {relative(e.createdAt, locale)}
-                      </td>
-                      <td>
-                        {e.actorType === "AGENT" ? (
-                          <span className="pill acc">
-                            <Icon name="wand" />
-                            {t("agent")}
-                          </span>
-                        ) : (
-                          <span className="path">{e.actorId ?? e.actorType}</span>
-                        )}
-                      </td>
-                      <td className="path">{e.action}</td>
-                      <td style={{ color: "var(--ink-3)", fontSize: 12 }}>
-                        {e.targetType ? `${e.targetType}` : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </Table>
-              );
-            })()}
-          </Card>
-        )}
+        {tab === "log" &&
+          (can(session.role, "auditlog:read") ? (
+            <Card
+              title={t("s_log")}
+              sub={locale === "fa" ? "تغییرناپذیر — فقط افزودنی" : "Immutable — append only"}
+              bare
+            >
+              {await (async () => {
+                const entries = await listAuditLog(session.orgId, 100);
+                if (entries.length === 0) return <Empty>{t("nothing_here")}</Empty>;
+                const people = await usersByIds(entries.map((e) => e.actorId));
+                return (
+                  <Table
+                    head={[{ label: t("time") }, { label: t("actor") }, { label: t("event") }, { label: t("target") }]}
+                  >
+                    {entries.map((e) => {
+                      const person = e.actorId ? people.get(e.actorId) : undefined;
+                      return (
+                        <tr key={e.id}>
+                          <td style={{ whiteSpace: "nowrap" }} title={dateTime(e.createdAt, locale)}>
+                            {relative(e.createdAt, locale)}
+                          </td>
+                          <td>
+                            {e.actorType === "AGENT" ? (
+                              <span className="pill acc">
+                                <Icon name="wand" />
+                                {t("agent")}
+                              </span>
+                            ) : person ? (
+                              <span className="path" dir="ltr">
+                                {person.name ?? person.email}
+                              </span>
+                            ) : (
+                              <span>
+                                {t(
+                                  e.actorType === "API_KEY"
+                                    ? "api_key"
+                                    : e.actorType === "USER"
+                                      ? "actor_user"
+                                      : "actor_system",
+                                )}
+                                {e.actorId && (
+                                  <span className="path" dir="ltr" style={{ marginInlineStart: 6 }}>
+                                    {e.actorId.slice(-6)}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                            {e.actorType === "API_KEY" && person && (
+                              <span className="pill mute" style={{ marginInlineStart: 6 }}>
+                                <Icon name="key" />
+                                {t("api_key")}
+                              </span>
+                            )}
+                          </td>
+                          <td>{describeAction(e.action, e.actorType, e.metadata, locale)}</td>
+                          <td style={{ color: "var(--ink-3)", fontSize: 12 }}>{targetTypeLabel(e.targetType, locale)}</td>
+                        </tr>
+                      );
+                    })}
+                  </Table>
+                );
+              })()}
+            </Card>
+          ) : (
+            <Note icon="lock">
+              {t("err_forbidden")} — {t("your_role")}: {roleLabel(session.role, locale)}
+            </Note>
+          ))}
       </div>
     </>
   );

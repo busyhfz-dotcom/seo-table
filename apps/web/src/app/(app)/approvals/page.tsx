@@ -1,34 +1,25 @@
 import { TopBar } from "../../../components/shell";
-import { actionLabel, fixTitle, fixWhy } from "../../../lib/labels";
+import { actionLabel, fixTitle, fixWhy, roleLabel, ruleTitle } from "../../../lib/labels";
 import { Card, Diff, Empty, Note, RiskPill } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
-import { defaultProject, getProject, listApprovalQueue } from "../../../lib/queries";
+import { listApprovalQueue } from "../../../lib/queries";
+import { usersByIds } from "../../../lib/views";
 import { num, relative } from "../../../lib/format";
-import { ALWAYS_APPROVAL } from "@seo/core";
+import { ALWAYS_APPROVAL, can } from "@seo/core";
 import { DecideButtons } from "./decide";
-import { sessionCan } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
 type Change = { url: string; field: string; before: string | null; after: string };
 
-export default async function ApprovalsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>;
-}) {
-  const params = await searchParams;
-  const { t, locale, pathname, session } = await pageContext();
-
-  const project = params.project
-    ? await getProject(session.orgId, params.project)
-    : await defaultProject(session.orgId);
+export default async function ApprovalsPage() {
+  const { t, locale, session, project } = await pageContext();
 
   if (!project) {
     return (
       <>
-        <TopBar t={t} locale={locale} pathname={pathname} title={t("approvals")} />
+        <TopBar title={t("approvals")} />
         <div className="view">
           <Card title={t("approvals")}>
             <Empty icon="rocket">{t("no_runs_yet")}</Empty>
@@ -38,14 +29,13 @@ export default async function ApprovalsPage({
     );
   }
 
-  const [queue, canDecide] = await Promise.all([
-    listApprovalQueue(project.id),
-    sessionCan("fix:approve_sensitive"),
-  ]);
+  const queue = await listApprovalQueue(project.id);
+  const canDecide = can(session.role, "fix:approve_sensitive");
+  const requesters = await usersByIds(queue.map((q) => q.approval?.requestedBy));
 
   return (
     <>
-      <TopBar t={t} locale={locale} pathname={pathname} title={t("approvals")} />
+      <TopBar title={t("approvals")} />
       <div className="view">
         <Note tone="lock" icon="lock">
           {t("appr_lock")}
@@ -53,7 +43,7 @@ export default async function ApprovalsPage({
 
         {!canDecide && (
           <Note icon="info">
-            {t("err_forbidden")} — {t("your_role")}: {session.role}
+            {t("err_forbidden")} — {t("your_role")}: {roleLabel(session.role, locale)}
           </Note>
         )}
 
@@ -88,7 +78,8 @@ export default async function ApprovalsPage({
                     {(fixWhy(proposal.action, proposal.rationale, locale) || issue?.title) && (
                       <p style={{ color: "var(--ink-2)", fontSize: 12.5, marginBottom: 12 }}>
                         <span style={{ color: "var(--ink-3)" }}>{t("why")}: </span>
-                        {fixWhy(proposal.action, proposal.rationale, locale) ?? issue?.title}
+                        {fixWhy(proposal.action, proposal.rationale, locale) ??
+                          (issue ? ruleTitle(issue.ruleId, issue.title, locale) : null)}
                       </p>
                     )}
 
@@ -109,14 +100,18 @@ export default async function ApprovalsPage({
                     >
                       <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
                         {t("requested_by")}:{" "}
-                        {approval?.requestedBy === "agent" || approval?.requestedBy === "AGENT"
-                          ? t("agent")
-                          : (approval?.requestedBy ?? t("agent"))}
+                        {(() => {
+                          const by = approval?.requestedBy;
+                          const person = by ? requesters.get(by) : undefined;
+                          if (person) return person.name ?? person.email;
+                          return t("agent");
+                        })()}
                       </span>
                       <span className="spacer" />
                       <DecideButtons
                         id={proposal.id}
                         disabled={!canDecide}
+                        locale={locale}
                         labels={{ approve: t("approve"), reject: t("reject"), forbidden: t("err_forbidden") }}
                       />
                     </div>

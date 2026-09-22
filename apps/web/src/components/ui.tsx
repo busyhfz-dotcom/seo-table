@@ -184,21 +184,38 @@ export function Empty({ children, icon = "box" }: { children: ReactNode; icon?: 
   );
 }
 
-export function Diff({ before, after, dir = "ltr" }: { before: string | null; after: string; dir?: "ltr" | "rtl" }) {
+/**
+ * Before/after of one change. Each line takes its direction from its own text
+ * (a Persian title reads right-to-left, a URL left-to-right), and only URLs use
+ * the monospace face.
+ */
+export function Diff({ before, after }: { before: string | null; after: string | null }) {
+  const line = (value: string | null) => {
+    const text = readableUrl(value) ?? "∅";
+    return (
+      <span dir="auto" className={looksLikeUrl(text) ? "url" : undefined}>
+        {text}
+      </span>
+    );
+  };
   return (
-    <div className="diff" dir={dir}>
+    <div className="diff">
       {before !== null && (
         <div className="del">
           <em>−</em>
-          <span>{readableUrl(before)}</span>
+          {line(before)}
         </div>
       )}
       <div className="add">
         <em>+</em>
-        <span>{readableUrl(after)}</span>
+        {line(after)}
       </div>
     </div>
   );
+}
+
+function looksLikeUrl(value: string): boolean {
+  return /^(https?:\/\/|\/)\S*$/.test(value.trim());
 }
 
 export function Bar({ value, max, tone }: { value: number; max: number; tone?: string }) {
