@@ -9,6 +9,7 @@
 import {
   and,
   auditRuns,
+  cuid,
   db,
   desc,
   eq,
@@ -98,11 +99,16 @@ export async function createScan(input: CreateScanInput): Promise<CreateScanResu
   if (!input.bypassRateLimit) await scanLimit(input.projectId);
 
   // 3) Insert. A concurrent request loses here rather than in application code.
+  //    The job id is a pure function of the run id, so it is written with the
+  //    row: nothing has to be updated after the job exists.
+  const runId = cuid();
   let run: AuditRun;
   try {
     const inserted = await db
       .insert(auditRuns)
       .values({
+        id: runId,
+        jobId: auditJobId(runId),
         projectId: input.projectId,
         status: "QUEUED",
         trigger: input.trigger ?? "MANUAL",
@@ -137,19 +143,16 @@ export async function createScan(input: CreateScanInput): Promise<CreateScanResu
 
   // 4) Enqueue. If this throws the run is marked FAILED rather than left QUEUED
   //    forever, because a QUEUED row blocks every future scan of the project.
+  //    Only a still-QUEUED row is touched: if the add reached Redis after all
+  //    and a worker already picked the run up, it is left to finish. A job that
+  //    did land on a FAILED run is a no-op for the worker (analyze skips it).
   try {
-    const jobId = await enqueueAudit({
+    await enqueueAudit({
       runId: run.id,
       projectId: run.projectId,
       requestedBy: input.actor.id ?? input.actor.type,
       correlationId,
     });
-    const updated = await db
-      .update(auditRuns)
-      .set({ jobId })
-      .where(eq(auditRuns.id, run.id))
-      .returning();
-    run = updated[0] ?? run;
   } catch (err) {
     await db
       .update(auditRuns)
@@ -159,7 +162,7 @@ export async function createScan(input: CreateScanInput): Promise<CreateScanResu
         error: (err as Error).message,
         finishedAt: new Date(),
       })
-      .where(eq(auditRuns.id, run.id));
+      .where(and(eq(auditRuns.id, run.id), eq(auditRuns.status, "QUEUED")));
     throw new Conflict("Could not queue the scan; the job queue is unavailable");
   }
 
@@ -172,7 +175,7 @@ export async function createScan(input: CreateScanInput): Promise<CreateScanResu
     metadata: { idempotencyKey, correlationId, trigger: run.trigger },
   });
   metric("scan.enqueued");
-  log.info({ runId: run.id, jobId: auditJobId(run.id) }, "scan queued");
+  log.info({ runId: run.id, jobId: run.jobId }, "scan queued");
 
   return { run, replayed: false };
 }
@@ -206,22 +209,36 @@ export async function cancelScan(input: {
   orgId: string;
   actor: Actor;
 }): Promise<AuditRun> {
-  const run = await getRun(input.runId);
+  // Scoped to the organization here as well as in the route: a run id from
+  // another tenant is "not found", never cancellable.
+  const run = (
+    await db
+      .select({ run: auditRuns })
+      .from(auditRuns)
+      .innerJoin(projects, eq(projects.id, auditRuns.projectId))
+      .where(and(eq(auditRuns.id, input.runId), eq(projects.orgId, input.orgId)))
+      .limit(1)
+  )[0]?.run;
   if (!run) throw new NotFound("Run not found");
-  if (!ACTIVE.includes(run.status)) {
-    throw new Conflict(`Run is ${run.status} and cannot be cancelled`);
-  }
+
+  // Conditional on the run still being active, so a run that finished (or was
+  // reaped) between the read and this write keeps its terminal state.
   const updated = (
     await db
       .update(auditRuns)
       .set({ status: "CANCELED", finishedAt: new Date() })
-      .where(eq(auditRuns.id, run.id))
+      .where(and(eq(auditRuns.id, run.id), inArray(auditRuns.status, ACTIVE)))
       .returning()
-  )[0]!;
+  )[0];
+  if (!updated) {
+    const current = await getRun(run.id);
+    throw new Conflict(`Run is ${current?.status ?? run.status} and cannot be cancelled`);
+  }
 
-  // Best effort: the worker also checks the row's status between pages.
+  // Best effort: the worker also checks the row's status between pages. An
+  // active job holds a lock and cannot be removed; it notices the status instead.
   const { auditQueue } = await import("../queue.js");
-  const job = run.jobId ? await auditQueue.getJob(run.jobId) : null;
+  const job = run.jobId ? await auditQueue.getJob(run.jobId).catch(() => null) : null;
   await job?.remove().catch(() => {});
 
   await recordAudit({
@@ -234,27 +251,89 @@ export async function cancelScan(input: {
   return updated;
 }
 
+// ---------------------------------------------------------------- liveness
+
+const HEARTBEAT_INTERVAL_MS = 15_000;
+const lastHeartbeat = new Map<string, number>();
+
 /**
- * Releases runs that a crashed worker left behind. Called by the worker on
- * startup and by the readiness probe, so a hard restart cannot permanently block
- * a project's scans.
+ * Records that the worker processing `runId` is alive. Cheap to call on every
+ * crawl progress tick: at most one write per run every 15 s from this process.
  */
-export async function reapStaleRuns(olderThanMinutes = 60): Promise<number> {
-  const result = await db
+export async function heartbeat(runId: string): Promise<void> {
+  const now = Date.now();
+  const last = lastHeartbeat.get(runId);
+  if (last !== undefined && now - last < HEARTBEAT_INTERVAL_MS) return;
+  lastHeartbeat.set(runId, now);
+  // Forget runs that stopped beating so the map stays bounded in a long-lived worker.
+  if (lastHeartbeat.size > 1000) {
+    for (const [id, at] of lastHeartbeat) {
+      if (now - at > HEARTBEAT_INTERVAL_MS) lastHeartbeat.delete(id);
+    }
+  }
+  await db
     .update(auditRuns)
-    .set({
-      status: "DEAD_LETTER",
-      errorCode: "STALE",
-      error: `Run exceeded ${olderThanMinutes} minutes with no completion; released so the project can be scanned again.`,
-      finishedAt: new Date(),
-    })
-    .where(
-      and(
-        inArray(auditRuns.status, ACTIVE),
-        sql`${auditRuns.queuedAt} < now() - (${olderThanMinutes} || ' minutes')::interval`,
-      ),
-    )
-    .returning({ id: auditRuns.id });
-  if (result.length > 0) metric("scan.reaped", result.length);
-  return result.length;
+    .set({ heartbeatAt: sql`now()` })
+    .where(and(eq(auditRuns.id, runId), inArray(auditRuns.status, ACTIVE)));
+}
+
+export type ReapOptions = {
+  /** A RUNNING run with no heartbeat for this long is a candidate. Default 15. */
+  staleMinutes?: number;
+  /** Whether the queue still holds a live job (waiting, delayed, active…) for the run. */
+  isJobAlive: (runId: string) => Promise<boolean>;
+};
+
+/** A QUEUED row is given this long for its job to reach the queue (createScan inserts first). */
+const QUEUED_GRACE_MINUTES = 2;
+
+/**
+ * Releases runs that a crashed worker or a lost job left behind, so a hard
+ * restart cannot permanently block a project's scans (a QUEUED/RUNNING row holds
+ * the one-active-run lock).
+ *
+ * A run is reaped only when BOTH hold: the database says it has gone quiet, and
+ * the queue has no live job for it. A long crawl that keeps beating, or a run
+ * waiting behind others, or one in retry backoff, is never touched. If the
+ * liveness check itself fails the run is kept — reaping on a guess would free
+ * the lock under a crawl that is still running.
+ */
+export async function reapStaleRuns(opts: ReapOptions): Promise<number> {
+  const staleMinutes = opts.staleMinutes ?? 15;
+  const queuedGrace = Math.min(QUEUED_GRACE_MINUTES, staleMinutes);
+  const lastSignOfLife = sql`coalesce(${auditRuns.heartbeatAt}, ${auditRuns.startedAt}, ${auditRuns.queuedAt})`;
+  const runningStale = and(
+    eq(auditRuns.status, "RUNNING"),
+    sql`${lastSignOfLife} < now() - ${staleMinutes}::double precision * interval '1 minute'`,
+  );
+  const queuedStale = and(
+    eq(auditRuns.status, "QUEUED"),
+    sql`${auditRuns.queuedAt} < now() - ${queuedGrace}::double precision * interval '1 minute'`,
+  );
+
+  const candidates = await db
+    .select({ id: auditRuns.id, status: auditRuns.status })
+    .from(auditRuns)
+    .where(sql`(${runningStale}) OR (${queuedStale})`);
+
+  let reaped = 0;
+  for (const candidate of candidates) {
+    const alive = await opts.isJobAlive(candidate.id).catch(() => true);
+    if (alive) continue;
+
+    // The staleness condition is re-checked in the UPDATE: a heartbeat or a
+    // status change since the SELECT wins over the reaper.
+    const error =
+      candidate.status === "RUNNING"
+        ? `No heartbeat for ${staleMinutes} minutes and no live job; released so the project can be scanned again.`
+        : "Queued, but its job is no longer in the queue; released so the project can be scanned again.";
+    const rows = await db
+      .update(auditRuns)
+      .set({ status: "DEAD_LETTER", errorCode: "STALE", error, finishedAt: new Date() })
+      .where(and(eq(auditRuns.id, candidate.id), candidate.status === "RUNNING" ? runningStale : queuedStale))
+      .returning({ id: auditRuns.id });
+    reaped += rows.length;
+  }
+  if (reaped > 0) metric("scan.reaped", reaped);
+  return reaped;
 }

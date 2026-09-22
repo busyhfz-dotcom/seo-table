@@ -14,7 +14,7 @@ export {
   constantTimeEquals,
   type SealedSecret,
 } from "./crypto.js";
-export { redis, pingRedis, closeRedis } from "./redis.js";
+export { redis, redisCommand, commandReady, pingRedis, closeRedis } from "./redis.js";
 export {
   auditQueue,
   fixQueue,

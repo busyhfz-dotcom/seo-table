@@ -5,28 +5,37 @@
 import pino from "pino";
 import { env } from "./env.js";
 
+// Each key is listed top-level and one level down (`*.key`): pino matches
+// paths literally, so `{ connector: { secretCipher } }` would otherwise leak.
+export const REDACT_PATHS: string[] = [
+  ...[
+    "password",
+    "passwordHash",
+    "token",
+    "tokenHash",
+    "accessToken",
+    "refreshToken",
+    "privateKey",
+    "secret",
+    "secretCipher",
+    "secretIv",
+    "secretTag",
+    "applicationPassword",
+    "credentials",
+    "authorization",
+    "cookie",
+  ].flatMap((k) => [k, `*.${k}`]),
+  "headers.authorization",
+  "headers.cookie",
+  "*.headers.authorization",
+  "*.headers.cookie",
+];
+
 export const logger = pino({
   level: env().LOG_LEVEL,
   base: { service: process.env.SERVICE_NAME ?? "seo-table" },
   redact: {
-    paths: [
-      "password",
-      "passwordHash",
-      "token",
-      "tokenHash",
-      "secret",
-      "secretCipher",
-      "secretIv",
-      "secretTag",
-      "applicationPassword",
-      "credentials",
-      "authorization",
-      "req.headers.authorization",
-      "req.headers.cookie",
-      "*.password",
-      "*.secret",
-      "*.token",
-    ],
+    paths: REDACT_PATHS,
     censor: "[redacted]",
   },
   formatters: {

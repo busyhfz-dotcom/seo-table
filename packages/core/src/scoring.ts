@@ -26,7 +26,9 @@ export function computeScore(pages: AnalyzedPage[], findings: Finding[]): ScoreB
   const scorable = pages.filter((p) => p.statusCode === 200);
   const byUrl = new Map<string, Finding[]>();
   for (const f of findings) {
-    byUrl.set(f.url, [...(byUrl.get(f.url) ?? []), f]);
+    const list = byUrl.get(f.url);
+    if (list) list.push(f);
+    else byUrl.set(f.url, [f]);
   }
 
   const categoryPenalty = new Map<string, number>();
@@ -61,9 +63,12 @@ export function computeScore(pages: AnalyzedPage[], findings: Finding[]): ScoreB
     });
   }
 
-  // Site-wide findings (no sitemap, no robots.txt) attach to no page, so they are
-  // applied once against the whole site.
-  const siteWide = findings.filter((f) => !scorable.some((p) => p.normalizedUrl === f.url));
+  // Site-wide findings (no sitemap, no robots.txt) attach to no crawled page, so
+  // they are applied once against the whole site. A finding on a crawled page
+  // that is not scored (a 404, a redirect) is already visible through the pages
+  // linking to it and must not count again as a site-wide penalty.
+  const crawledUrls = new Set(pages.map((p) => p.normalizedUrl));
+  const siteWide = findings.filter((f) => !crawledUrls.has(f.url));
   const siteWidePenalty = Math.min(
     15,
     siteWide.reduce((sum, f) => sum + SEVERITY_WEIGHT[f.severity] / 3, 0),

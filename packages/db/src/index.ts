@@ -13,13 +13,15 @@ export type Db = NodePgDatabase<typeof schema>;
 function makePool(): Pool {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  const needsSsl = /\bsslmode=(require|verify-ca|verify-full)\b/.test(url) || process.env.PGSSL === "require";
+  // An `sslmode` in the URL governs TLS on its own (pg parses it). PGSSL=require
+  // is for URLs without one and means verified TLS, never an unchecked certificate.
+  const sslFromEnv = !/\bsslmode=/.test(url) && process.env.PGSSL === "require";
   return new Pool({
     connectionString: url,
     max: Number(process.env.DB_POOL_MAX ?? 10),
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
-    ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+    ...(sslFromEnv ? { ssl: true } : {}),
   });
 }
 

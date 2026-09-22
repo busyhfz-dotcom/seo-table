@@ -22,6 +22,12 @@ export class BadRequest extends AppError {
     super(400, "BAD_REQUEST", message, details);
   }
 }
+/** The target URL resolves to an address the crawler and connectors must not reach. */
+export class BlockedAddress extends AppError {
+  constructor(message = "That address is not reachable from this service", details?: unknown) {
+    super(400, "BLOCKED_ADDRESS", message, details);
+  }
+}
 export class Unauthorized extends AppError {
   constructor(message = "Authentication required") {
     super(401, "UNAUTHORIZED", message);
@@ -42,9 +48,10 @@ export class Conflict extends AppError {
     super(409, "CONFLICT", message, details);
   }
 }
-export class ScanAlreadyRunning extends Conflict {
+/** A Conflict with its own code, so the UI can say "a scan is already running". */
+export class ScanAlreadyRunning extends AppError {
   constructor(runId?: string) {
-    super("A scan is already active for this project", { activeRunId: runId });
+    super(409, "SCAN_ACTIVE", "A scan is already active for this project", { activeRunId: runId });
   }
 }
 export class RateLimited extends AppError {

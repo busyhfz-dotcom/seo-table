@@ -66,6 +66,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
 };
 
 export function can(role: Role, permission: Permission): boolean {
+  // A role string from a stale session or a future enum value grants nothing;
+  // `hasOwn` also keeps "constructor" and friends from resolving on the prototype.
+  if (!Object.hasOwn(ROLE_PERMISSIONS, role)) return false;
   return ROLE_PERMISSIONS[role].includes(permission);
 }
 

@@ -26,6 +26,7 @@ const scrypt = promisify(scryptCb) as (
 ) => Promise<Buffer>;
 
 const SCRYPT_KEYLEN = 64;
+const SCRYPT_SALT_BYTES = 16;
 
 export type SealedSecret = { cipher: string; iv: string; tag: string };
 
@@ -44,9 +45,19 @@ export function seal(plaintext: string): SealedSecret {
   };
 }
 
+const GCM_IV_BYTES = 12;
+const GCM_TAG_BYTES = 16;
+
 export function unseal(s: SealedSecret): string {
-  const d = createDecipheriv("aes-256-gcm", key(), Buffer.from(s.iv, "base64"));
-  d.setAuthTag(Buffer.from(s.tag, "base64"));
+  const iv = Buffer.from(s.iv, "base64");
+  const tag = Buffer.from(s.tag, "base64");
+  // GCM accepts truncated tags unless told otherwise, and a short tag is far
+  // easier to forge. Only what `seal` produces is accepted.
+  if (iv.length !== GCM_IV_BYTES || tag.length !== GCM_TAG_BYTES) {
+    throw new Error("Sealed secret is malformed");
+  }
+  const d = createDecipheriv("aes-256-gcm", key(), iv, { authTagLength: GCM_TAG_BYTES });
+  d.setAuthTag(tag);
   return Buffer.concat([d.update(Buffer.from(s.cipher, "base64")), d.final()]).toString("utf8");
 }
 
@@ -62,18 +73,34 @@ export function unsealJson<T>(s: SealedSecret): T {
 
 export async function hashPassword(password: string): Promise<string> {
   if (password.length < 10) throw new Error("Password must be at least 10 characters");
-  const salt = randomBytes(16);
+  const salt = randomBytes(SCRYPT_SALT_BYTES);
   const derived = await scrypt(password, salt, SCRYPT_KEYLEN);
   return `scrypt$1$${salt.toString("base64")}$${derived.toString("base64")}`;
 }
 
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const parsed = parseScryptHash(stored);
+  // A malformed hash still costs one derivation, so login timing does not tell
+  // an unknown account (the caller passes a placeholder hash) from a known one.
+  const derived = await scrypt(password, parsed?.salt ?? Buffer.alloc(SCRYPT_SALT_BYTES), SCRYPT_KEYLEN);
+  return parsed !== null && timingSafeEqual(derived, parsed.expected);
+}
+
+/**
+ * Strict parse of `scrypt$1$<salt>$<hash>`. The key length used to be taken from
+ * the stored hash, so an empty one (`scrypt$1$x$`) matched every password.
+ */
+function parseScryptHash(stored: string): { salt: Buffer; expected: Buffer } | null {
   const parts = stored.split("$");
-  if (parts.length !== 4 || parts[0] !== "scrypt") return false;
-  const salt = Buffer.from(parts[2]!, "base64");
-  const expected = Buffer.from(parts[3]!, "base64");
-  const derived = await scrypt(password, salt, expected.length);
-  return derived.length === expected.length && timingSafeEqual(derived, expected);
+  if (parts.length !== 4 || parts[0] !== "scrypt" || parts[1] !== "1") return null;
+  const [, , saltB64, hashB64] = parts as [string, string, string, string];
+  if (!BASE64.test(saltB64) || !BASE64.test(hashB64)) return null;
+  const salt = Buffer.from(saltB64, "base64");
+  const expected = Buffer.from(hashB64, "base64");
+  if (salt.length !== SCRYPT_SALT_BYTES || expected.length !== SCRYPT_KEYLEN) return null;
+  return { salt, expected };
 }
 
 // ---------------------------------------------------------------- tokens

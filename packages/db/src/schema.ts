@@ -4,10 +4,11 @@
  * Two invariants live in the database, not in application code:
  *
  *  1. `issue_occurrences` and `audit_log` are append-only. Migration
- *     0002 installs rules that reject UPDATE and DELETE, so history cannot be
+ *     0001 installs triggers that reject UPDATE and DELETE (0003 adds the
+ *     explicit purge door, 0004 also refuses TRUNCATE), so history cannot be
  *     rewritten even by a buggy caller or a stray script.
  *
- *  2. A project has at most one active audit run. Migration 0002 installs a
+ *  2. A project has at most one active audit run. Migration 0001 installs a
  *     partial unique index on (project_id) WHERE status IN ('QUEUED','RUNNING'),
  *     so a second concurrent run fails with a unique violation rather than
  *     relying on a check-then-insert race in the API.
@@ -128,6 +129,9 @@ export const memberships = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: roleEnum("role").notNull(),
+    // Orders a user's organizations when a session has no org chosen yet. Rows
+    // that predate 0004 share one timestamp, so tie-break on the (sortable) id.
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("memberships_user_org_uq").on(t.userId, t.orgId), index("memberships_org_idx").on(t.orgId)],
 );
@@ -140,12 +144,14 @@ export const sessions = pgTable(
     userId: varchar("user_id", { length: 30 })
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** The organization this session acts in; null for sessions created before 0004. */
+    orgId: varchar("org_id", { length: 30 }).references(() => organizations.id, { onDelete: "cascade" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     userAgent: text("user_agent"),
     ip: text("ip"),
   },
-  (t) => [index("sessions_user_idx").on(t.userId)],
+  (t) => [index("sessions_user_idx").on(t.userId), index("sessions_org_idx").on(t.orgId)],
 );
 
 export const apiKeys = pgTable(
@@ -208,6 +214,8 @@ export const auditRuns = pgTable(
     errorCode: text("error_code"),
     queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
+    /** Last sign of life from the worker; the reaper judges staleness by it, not by queue time. */
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     createdById: text("created_by_id"),
   },
@@ -297,7 +305,7 @@ export const seoIssues = pgTable(
   ],
 );
 
-/** APPEND-ONLY — see migration 0002. */
+/** APPEND-ONLY — see migrations 0001, 0003 and 0004. */
 export const issueOccurrences = pgTable(
   "issue_occurrences",
   {
@@ -308,7 +316,10 @@ export const issueOccurrences = pgTable(
     auditRunId: varchar("audit_run_id", { length: 30 })
       .notNull()
       .references(() => auditRuns.id, { onDelete: "cascade" }),
-    pageSnapshotId: varchar("page_snapshot_id", { length: 30 }),
+    // NO ACTION rather than SET NULL: nulling the column would be an UPDATE, which
+    // the append-only trigger refuses. A purge deletes the snapshot and its
+    // occurrences in the same statement, so the check passes there.
+    pageSnapshotId: varchar("page_snapshot_id", { length: 30 }).references(() => pageSnapshots.id),
     url: text("url").notNull(),
     kind: occurrenceKindEnum("kind").notNull(),
     severity: severityEnum("severity").notNull(),
@@ -333,7 +344,7 @@ export const fixProposals = pgTable(
     projectId: varchar("project_id", { length: 30 })
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    issueId: varchar("issue_id", { length: 30 }),
+    issueId: varchar("issue_id", { length: 30 }).references(() => seoIssues.id, { onDelete: "set null" }),
     ruleId: text("rule_id").notNull(),
     action: fixActionEnum("action").notNull(),
     risk: riskEnum("risk").notNull(),
@@ -445,7 +456,7 @@ export const contentOpportunities = pgTable(
 
 // ---------------------------------------------------------------- audit log
 
-/** APPEND-ONLY — see migration 0002. */
+/** APPEND-ONLY — see migrations 0001, 0003 and 0004. */
 export const auditLog = pgTable(
   "audit_log",
   {

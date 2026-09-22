@@ -14,6 +14,7 @@ import {
   eq,
   fixProposals,
   inArray,
+  projects,
   seoIssues,
   type FixAction,
   type FixProposal,
@@ -37,8 +38,11 @@ export type ProposalDraft = {
 };
 
 /**
- * Collapse the fixes attached to a group of findings into one proposal per
- * (rule, action) — a user approves "trim 77 meta descriptions" once, not 77 times.
+ * Collapse the fixes attached to an issue's findings into one proposal per
+ * (issue, action) — a user approves "trim 77 meta descriptions" once, not 77
+ * times. Keyed by issue rather than by rule so every proposal links to the issue
+ * its changes actually come from (one rule can raise several issues, e.g.
+ * titles too long and titles too short).
  */
 export function draftsFromGroups(projectId: string, groups: IssueGroup[], issueIdByFingerprint: Map<string, string>): ProposalDraft[] {
   const drafts = new Map<string, ProposalDraft>();
@@ -47,7 +51,7 @@ export function draftsFromGroups(projectId: string, groups: IssueGroup[], issueI
     for (const finding of group.findings) {
       const fix = finding.fix;
       if (!fix) continue;
-      const key = `${finding.ruleId}:${fix.action}`;
+      const key = `${group.fingerprint}:${fix.action}`;
       const existing = drafts.get(key);
       if (existing) {
         if (!existing.changes.some((c) => c.url === fix.change.url && c.selector === fix.change.selector)) {
@@ -102,35 +106,44 @@ export async function createProposals(input: {
     if (draft.changes.length === 0) continue;
     const needsApproval = requiresApproval(draft.action, draft.risk);
 
-    const row = (
-      await db
-        .insert(fixProposals)
-        .values({
-          projectId: draft.projectId,
-          issueId: draft.issueId,
-          ruleId: draft.ruleId,
-          action: draft.action,
-          risk: draft.risk,
-          // DRAFT until a dry run has been recorded; the executor enforces that.
-          status: "DRAFT",
-          title: draft.title,
-          rationale: draft.rationale,
-          targetCount: draft.changes.length,
-          changes: draft.changes,
-        })
-        .returning()
-    )[0]!;
+    // The proposal, its approval request and its status land together; a crash
+    // in between must not leave a DRAFT that silently skipped the approval queue.
+    const row = await db.transaction(async (tx) => {
+      const inserted = (
+        await tx
+          .insert(fixProposals)
+          .values({
+            projectId: draft.projectId,
+            issueId: draft.issueId,
+            ruleId: draft.ruleId,
+            action: draft.action,
+            risk: draft.risk,
+            // DRAFT until a dry run has been recorded; the executor enforces that.
+            status: "DRAFT",
+            title: draft.title,
+            rationale: draft.rationale,
+            targetCount: draft.changes.length,
+            changes: draft.changes,
+          })
+          .returning()
+      )[0]!;
 
-    if (needsApproval) {
-      await db.insert(approvals).values({
-        fixProposalId: row.id,
+      if (!needsApproval) return inserted;
+      await tx.insert(approvals).values({
+        fixProposalId: inserted.id,
         decision: "PENDING",
         requestedBy: input.actor.id ?? input.actor.type,
-      });
-      await db
+    });
+    return (
+      await tx
         .update(fixProposals)
         .set({ status: "AWAITING_APPROVAL", updatedAt: new Date() })
-        .where(eq(fixProposals.id, row.id));
+        .where(eq(fixProposals.id, inserted.id))
+        .returning()
+    )[0]!;
+    });
+
+    if (needsApproval) {
       await recordAudit({
         orgId: input.orgId,
         actor: input.actor,
@@ -194,33 +207,61 @@ export async function decide(input: {
   approve: boolean;
   reason?: string;
 }): Promise<FixProposal> {
-  const proposal = await getProposal(input.proposalId);
-  if (!proposal) throw new NotFound("Proposal not found");
-  if (proposal.status !== "AWAITING_APPROVAL") {
-    throw new Conflict(`Proposal is ${proposal.status}; only AWAITING_APPROVAL can be decided`);
-  }
   // An agent can request approval but can never grant it.
   if (input.actor.type !== "USER") {
     throw new Conflict("Only a person can approve or reject a fix");
   }
+  // Scoped to the organization here as well as in the route.
+  const proposal = (
+    await db
+      .select({ proposal: fixProposals })
+      .from(fixProposals)
+      .innerJoin(projects, eq(projects.id, fixProposals.projectId))
+      .where(and(eq(fixProposals.id, input.proposalId), eq(projects.orgId, input.orgId)))
+      .limit(1)
+  )[0]?.proposal;
+  if (!proposal) throw new NotFound("Proposal not found");
 
-  await db
-    .update(approvals)
-    .set({
-      decision: input.approve ? "APPROVED" : "REJECTED",
+  const decision = input.approve ? "APPROVED" : "REJECTED";
+  const notDecidable = (status: string) =>
+    new Conflict(`Proposal is ${status}; only AWAITING_APPROVAL can be decided`);
+  if (proposal.status !== "AWAITING_APPROVAL") throw notDecidable(proposal.status);
+
+  // Both rows change together, and each update is conditional on the state the
+  // decision was made against: of two concurrent decisions exactly one wins, and
+  // the loser changes nothing.
+  const updated = await db.transaction(async (tx) => {
+    const row = (
+      await tx
+        .update(fixProposals)
+        .set({ status: decision, updatedAt: new Date() })
+        .where(and(eq(fixProposals.id, proposal.id), eq(fixProposals.status, "AWAITING_APPROVAL")))
+        .returning()
+    )[0];
+    if (!row) {
+      const current = await getProposal(proposal.id);
+      throw notDecidable(current?.status ?? "gone");
+    }
+    // Upsert: a proposal parked for approval without its request row (written by
+    // hand, or before the request insert existed) still records who decided.
+    const decided = {
+      decision,
       decidedById: input.actor.id ?? null,
       decidedAt: new Date(),
       reason: input.reason ?? null,
-    })
-    .where(eq(approvals.fixProposalId, proposal.id));
-
-  const updated = (
-    await db
-      .update(fixProposals)
-      .set({ status: input.approve ? "APPROVED" : "REJECTED", updatedAt: new Date() })
-      .where(eq(fixProposals.id, proposal.id))
-      .returning()
-  )[0]!;
+    } as const;
+    const approval = await tx
+      .insert(approvals)
+      .values({ fixProposalId: proposal.id, requestedBy: input.actor.id ?? input.actor.type, ...decided })
+      .onConflictDoUpdate({
+        target: approvals.fixProposalId,
+        set: decided,
+        setWhere: eq(approvals.decision, "PENDING"),
+      })
+      .returning({ id: approvals.id });
+    if (approval.length === 0) throw new Conflict("This approval has already been decided");
+    return row;
+  });
 
   await recordAudit({
     orgId: input.orgId,

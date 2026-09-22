@@ -29,6 +29,13 @@
       "when": 1789937375137,
       "tag": "0003_append_only_purge_door",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790073769683,
+      "tag": "0004_hardening_heartbeat_session_org",
+      "breakpoints": true
     }
   ]
 }
