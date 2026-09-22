@@ -7,3 +7,7 @@ out
 .env.local
 coverage
 .DS_Store
+
+# Local Redis snapshots
+dump.rdb
+*.rdb

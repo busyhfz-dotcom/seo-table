@@ -21,6 +21,6 @@ export default defineConfig({
     poolOptions: { forks: { singleFork: true } },
     sequence: { concurrent: false },
     // A test run must never share queues with a worker that happens to be running.
-    env: { NODE_ENV: "test", QUEUE_PREFIX: "seo-test" },
+    env: { NODE_ENV: "test", QUEUE_PREFIX: process.env.TEST_QUEUE_PREFIX ?? "seo-test" },
   },
 });
