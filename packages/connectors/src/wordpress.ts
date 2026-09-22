@@ -3,17 +3,21 @@
  *
  * What WordPress can and cannot do is probed rather than assumed:
  *
- *  - Post/page title and content: core `wp/v2`, always writable.
- *  - Image alt text: core `wp/v2/media` exposes `alt_text`, always writable.
- *  - Meta description and SEO title: WordPress core has no such field. Yoast and
- *    Rank Math store them in post meta that is not writable over REST unless the
- *    site registers it. So we probe for a companion namespace and, failing that,
- *    report the field as unsupported with an actionable message instead of
- *    pretending the write succeeded.
- *  - Redirects: core has no redirect table. Probed for `redirection/v1` or our
- *    own mu-plugin namespace.
+ *  - Image alt text: core REST, always writable. An image embedded in post
+ *    content renders the alt written in that HTML, so the alt is changed there;
+ *    only an image outside the content (a featured image) uses the media item's
+ *    `alt_text`.
+ *  - SEO title, meta description, canonical, robots: core has no such fields.
+ *    Yoast and Rank Math keep them in post meta that REST cannot write, so they
+ *    need the bridge plugin; without it they are reported as unsupported rather
+ *    than faked. The visible post title is never used as a stand-in.
+ *  - Redirects: core has no redirect table; only the bridge's is supported.
  *
- * The optional mu-plugin that closes those gaps ships in
+ * Every write targets the post whose permalink IS the requested URL: the post
+ * is resolved by path (never by full-text search) and its link is compared with
+ * the URL before anything is written.
+ *
+ * The mu-plugin that closes those gaps ships in
  * `packages/connectors/wordpress-plugin/seo-table-bridge.php`.
  */
 import type { FixAction } from "@seo/db";
@@ -35,26 +39,43 @@ export type WordPressCredentials = {
 };
 
 const BRIDGE_NS = "seo-table/v1";
+/** The oldest bridge with path resolution, deletes and the hardened permission checks. */
+const MIN_BRIDGE_VERSION = [0, 5, 0] as const;
+const BRIDGE_POST_FIELDS = ["title", "meta_description", "canonical", "meta_robots"];
 
 type WpRoot = { namespaces?: string[]; name?: string; description?: string };
 type WpPost = {
   id: number;
   link: string;
   title?: { rendered?: string; raw?: string };
-  type?: string;
-  meta?: Record<string, unknown>;
+  content?: { raw?: string; rendered?: string };
 };
-type WpMedia = { id: number; source_url: string; alt_text?: string };
+/** A post together with the REST route it lives under (pages, posts, a custom type's rest_base). */
+type ResolvedPost = { id: number; link: string; restNamespace: string; restBase: string };
+type WpType = { slug?: string; rest_base?: string; rest_namespace?: string };
+type WpMedia = {
+  id: number;
+  source_url: string;
+  alt_text?: string;
+  media_details?: { sizes?: Record<string, { source_url?: string }> };
+};
+type BridgeInfo = { version?: string };
+
+/** Post types that never own a public permalink worth fixing. */
+const NON_CONTENT_TYPES = new Set(["attachment", "nav_menu_item", "revision", "custom_css", "customize_changeset", "oembed_cache", "user_request"]);
 
 export function wordpress(creds: WordPressCredentials): Connector {
   const base = creds.siteUrl.replace(/\/+$/, "");
   const auth = `Basic ${Buffer.from(`${creds.username}:${creds.applicationPassword}`).toString("base64")}`;
   const headers = { authorization: auth, "content-type": "application/json", accept: "application/json" };
 
-  let capCache: ConnectorCapabilities | null = null;
+  let capCache: (ConnectorCapabilities & { bridge: boolean }) | null = null;
+
+  const api = <T>(path: string, init: RequestInit = {}) =>
+    httpJson<T>(`${base}/wp-json/${path}`, { headers, ...init });
 
   async function root(): Promise<WpRoot> {
-    const { status, data } = await httpJson<WpRoot>(`${base}/wp-json/`, { headers });
+    const { status, data } = await api<WpRoot>("");
     if (status === 404) {
       throw new ConnectorError("rest_api_disabled", "The site does not expose the WordPress REST API at /wp-json/");
     }
@@ -64,45 +85,47 @@ export function wordpress(creds: WordPressCredentials): Connector {
     return data;
   }
 
-  async function capabilities(): Promise<ConnectorCapabilities> {
+  async function probeCapabilities(): Promise<ConnectorCapabilities & { bridge: boolean }> {
     if (capCache) return capCache;
     const info = await root();
     const ns = new Set(info.namespaces ?? []);
-    const hasBridge = ns.has(BRIDGE_NS);
-    const hasYoast = ns.has("yoast/v1");
-    const hasRankMath = ns.has("rankmath/v1");
-    const hasRedirection = ns.has("redirection/v1");
-
-    const writableFields = ["post_title", "img.alt"];
+    const writableFields = ["img.alt"];
     const supportedActions: FixAction[] = ["ALT_TEXT"];
     const notes: string[] = [];
 
-    if (hasBridge) {
-      writableFields.push("title", "meta_description", "canonical", "meta_robots", "redirect");
-      supportedActions.push("TITLE_REWRITE", "META_REWRITE", "CANONICAL_FIX", "ROBOTS_FIX", "REDIRECT");
-      notes.push("SEO Table bridge plugin detected: SEO title, meta description, canonical, robots and redirects are writable.");
-    } else {
+    let bridge = false;
+    if (ns.has(BRIDGE_NS)) {
+      const probe = await api<BridgeInfo>(`${BRIDGE_NS}/info`);
+      const version = probe.status === 200 ? probe.data?.version : undefined;
+      if (version && versionAtLeast(version, MIN_BRIDGE_VERSION)) {
+        bridge = true;
+        writableFields.push(...BRIDGE_POST_FIELDS, "redirect");
+        supportedActions.push("TITLE_REWRITE", "META_REWRITE", "CANONICAL_FIX", "ROBOTS_FIX", "REDIRECT");
+        notes.push(`SEO Table bridge plugin ${version} detected: SEO title, meta description, canonical, robots and redirects are writable.`);
+      } else {
+        notes.push(
+          `The SEO Table bridge plugin on this site is outdated (${version ?? "before 0.5.0"}). Update it to ${MIN_BRIDGE_VERSION.join(".")} or later to enable SEO fields and redirects.`,
+        );
+      }
+    }
+    if (!bridge) {
       notes.push(
-        "No SEO Table bridge plugin found. SEO title, meta description, canonical and robots are not writable over the core REST API.",
+        "Without the SEO Table bridge plugin, SEO title, meta description, canonical, robots and redirects are not writable over the WordPress REST API.",
       );
-      if (hasYoast) notes.push("Yoast detected (read-only over REST). Install the bridge plugin to let fixes write its fields.");
-      if (hasRankMath) notes.push("Rank Math detected (read-only over REST). Install the bridge plugin to let fixes write its fields.");
-      // The post title is writable without any plugin, but it is what visitors
-      // see, so it stays SENSITIVE in the policy.
-      supportedActions.push("TITLE_REWRITE");
-      writableFields.push("title:post_title_fallback");
+      if (ns.has("yoast/v1")) notes.push("Yoast detected (read-only over REST). Install the bridge plugin to let fixes write its fields.");
+      if (ns.has("rankmath/v1")) notes.push("Rank Math detected (read-only over REST). Install the bridge plugin to let fixes write its fields.");
+      if (ns.has("redirection/v1")) {
+        notes.push("The Redirection plugin is detected, but SEO Table writes redirects only through its bridge plugin.");
+      }
     }
 
-    if (hasRedirection && !hasBridge) {
-      writableFields.push("redirect");
-      supportedActions.push("REDIRECT");
-      notes.push("Redirection plugin detected: redirects can be created (still requires human approval).");
-    } else if (!hasRedirection && !hasBridge) {
-      notes.push("No redirect plugin found, so redirect fixes cannot be executed on this site.");
-    }
-
-    capCache = { writableFields, supportedActions, notes };
+    capCache = { writableFields, supportedActions, notes, bridge };
     return capCache;
+  }
+
+  async function capabilities(): Promise<ConnectorCapabilities> {
+    const { writableFields, supportedActions, notes } = await probeCapabilities();
+    return { writableFields, supportedActions, notes };
   }
 
   /**
@@ -117,7 +140,7 @@ export function wordpress(creds: WordPressCredentials): Connector {
     type WpErr = { code?: string; message?: string };
     type Me = { id?: number; name?: string; capabilities?: Record<string, boolean> } & WpErr;
     try {
-      const me = await httpJson<Me>(`${base}/wp-json/wp/v2/users/me?context=edit`, { headers });
+      const me = await api<Me>("wp/v2/users/me?context=edit");
       if (me.status === 200 && me.data?.id) {
         const caps = await capabilities();
         if (me.data.capabilities?.edit_posts === false) {
@@ -133,10 +156,7 @@ export function wordpress(creds: WordPressCredentials): Connector {
 
       // The users endpoint is a favourite target of security plugins. What we
       // actually need is permission to edit posts, so ask for that directly.
-      const posts = await httpJson<unknown[] | WpErr>(
-        `${base}/wp-json/wp/v2/posts?context=edit&per_page=1&_fields=id`,
-        { headers },
-      );
+      const posts = await api<unknown[] | WpErr>("wp/v2/posts?context=edit&per_page=1&_fields=id");
       if (posts.status === 200 && Array.isArray(posts.data)) {
         const caps = await capabilities();
         return {
@@ -154,6 +174,7 @@ export function wordpress(creds: WordPressCredentials): Connector {
 
       return classify(posts.status === 404 ? me : posts);
     } catch (err) {
+      // blocked_address and redirected arrive here as ConnectorError codes.
       if (err instanceof ConnectorError) return { ok: false, reason: err.code, message: err.message };
       return { ok: false, reason: "network_error", message: (err as Error).message };
     }
@@ -205,136 +226,236 @@ export function wordpress(creds: WordPressCredentials): Connector {
     }
   }
 
-  /** Resolve a public URL to the post or page behind it. */
-  async function resolvePost(url: string): Promise<WpPost> {
-    // WordPress ships an endpoint for exactly this lookup.
-    const { status, data } = await httpJson<{ id?: number; type?: string }>(
-      `${base}/wp-json/wp/v2/search?search=${encodeURIComponent(url)}&per_page=1`,
-      { headers },
-    );
-    const first = Array.isArray(data) ? (data[0] as { id?: number; subtype?: string; type?: string }) : undefined;
-    if (status < 400 && first?.id) {
-      const subtype = first.subtype ?? "posts";
-      const collection = subtype === "page" ? "pages" : subtype === "post" ? "posts" : `${subtype}s`;
-      const res = await httpJson<WpPost>(`${base}/wp-json/wp/v2/${collection}/${first.id}?context=edit`, { headers });
-      if (res.status < 400 && res.data) return { ...res.data, type: collection };
+  // ---- resolving a URL to the post behind it --------------------------------
+
+  /**
+   * The post whose permalink is exactly `url`. Resolved by path — the bridge
+   * asks WordPress itself (url_to_postid, which also knows the front page);
+   * without it, by slug across pages, posts and custom types, keeping only the
+   * candidate whose link matches the whole path. Anything else is refused.
+   */
+  async function resolvePost(url: string): Promise<ResolvedPost> {
+    const target = comparableUrl(url);
+    if (!target || !sameSite(url, base)) {
+      throw new ConnectorError("url_outside_site", `${url} is not an address on ${base}`);
     }
 
-    // Fall back to matching by slug across posts and pages.
-    const slug = lastSegment(url);
-    for (const collection of ["pages", "posts"]) {
-      const res = await httpJson<WpPost[]>(
-        `${base}/wp-json/wp/v2/${collection}?slug=${encodeURIComponent(slug)}&context=edit&per_page=1`,
-        { headers },
+    const { bridge } = await probeCapabilities();
+    const post = bridge ? await resolveViaBridge(url) : await resolveBySlug(url, target);
+    if (comparableUrl(post.link) !== target) {
+      throw new ConnectorError(
+        "post_url_mismatch",
+        `WordPress resolved ${url} to post ${post.id}, whose address is ${post.link}; nothing was written.`,
+        { postId: post.id, link: post.link },
       );
-      const hit = res.data?.[0];
-      if (hit?.id) return { ...hit, type: collection };
     }
-    throw new ConnectorError("post_not_found", `No WordPress post or page matches ${url}`);
+    return post;
   }
 
-  async function resolveMedia(src: string): Promise<WpMedia> {
-    const file = lastSegment(src).replace(/\.[a-z0-9]+$/i, "");
-    const res = await httpJson<WpMedia[]>(
-      `${base}/wp-json/wp/v2/media?search=${encodeURIComponent(file)}&per_page=5&context=edit`,
-      { headers },
+  async function resolveViaBridge(url: string): Promise<ResolvedPost> {
+    const res = await api<{ id?: number; link?: string; rest_base?: string; rest_namespace?: string }>(
+      `${BRIDGE_NS}/resolve?url=${encodeURIComponent(url)}`,
     );
-    const hit = res.data?.find((m) => m.source_url?.includes(file)) ?? res.data?.[0];
-    if (!hit?.id) throw new ConnectorError("media_not_found", `No media item matches ${src}`);
-    return hit;
+    if (res.status === 404) throw new ConnectorError("post_not_found", `No WordPress post or page has the address ${url}`);
+    if (res.status >= 400 || !res.data?.id || !res.data.link || !res.data.rest_base) {
+      throw new ConnectorError(`http_${res.status}`, `The bridge could not resolve ${url}: ${res.text.slice(0, 200)}`);
+    }
+    return {
+      id: res.data.id,
+      link: res.data.link,
+      restBase: res.data.rest_base,
+      restNamespace: res.data.rest_namespace ?? "wp/v2",
+    };
   }
+
+  async function resolveBySlug(url: string, target: string): Promise<ResolvedPost> {
+    const slug = lastSegment(url);
+    if (!slug) {
+      // The front page has no slug in its URL; only WordPress knows which post it is.
+      throw new ConnectorError(
+        "home_page_unsupported",
+        "The home page can only be edited with the SEO Table bridge plugin installed.",
+      );
+    }
+    const routes: Array<{ restNamespace: string; restBase: string }> = [
+      { restNamespace: "wp/v2", restBase: "pages" },
+      { restNamespace: "wp/v2", restBase: "posts" },
+      ...(await customTypeRoutes()),
+    ];
+    const matches: ResolvedPost[] = [];
+    for (const route of routes) {
+      const res = await api<WpPost[]>(
+        `${route.restNamespace}/${route.restBase}?slug=${encodeURIComponent(slug)}&context=edit&per_page=100&_fields=id,link`,
+      );
+      if (res.status >= 400 || !Array.isArray(res.data)) continue;
+      // Several pages can share a slug under different parents; the full link decides.
+      for (const hit of res.data) {
+        if (hit?.id && hit.link && comparableUrl(hit.link) === target) matches.push({ ...route, id: hit.id, link: hit.link });
+      }
+    }
+    if (matches.length === 0) throw new ConnectorError("post_not_found", `No WordPress post or page has the address ${url}`);
+    if (matches.length > 1) {
+      throw new ConnectorError("post_ambiguous", `${matches.length} WordPress posts claim the address ${url}; nothing was written.`);
+    }
+    return matches[0]!;
+  }
+
+  async function customTypeRoutes(): Promise<Array<{ restNamespace: string; restBase: string }>> {
+    const res = await api<Record<string, WpType>>("wp/v2/types");
+    if (res.status >= 400 || !res.data || typeof res.data !== "object") return [];
+    return Object.entries(res.data)
+      .filter(([slug, t]) => t.rest_base && !["post", "page"].includes(slug) && !NON_CONTENT_TYPES.has(slug) && !slug.startsWith("wp_"))
+      .map(([, t]) => ({ restNamespace: t.rest_namespace ?? "wp/v2", restBase: t.rest_base! }));
+  }
+
+  async function postContent(post: ResolvedPost): Promise<string> {
+    const res = await api<WpPost>(`${post.restNamespace}/${post.restBase}/${post.id}?context=edit&_fields=id,link,content`);
+    const raw = res.data?.content?.raw;
+    if (res.status >= 400 || typeof raw !== "string") {
+      throw new ConnectorError("content_unreadable", `Could not read the content of post ${post.id} (HTTP ${res.status})`);
+    }
+    return raw;
+  }
+
+  // ---- images ---------------------------------------------------------------
+
+  type ImageLocation =
+    | { kind: "content"; post: ResolvedPost; raw: string; alt: string | null }
+    | { kind: "media"; media: WpMedia };
+
+  /**
+   * Where the alt the scanner saw actually comes from: the <img> tag in the
+   * post's own content when it is there, otherwise the media item (featured
+   * images and other theme-rendered images).
+   */
+  async function locateImage(pageUrl: string, src: string): Promise<ImageLocation> {
+    let post: ResolvedPost | null = null;
+    try {
+      post = await resolvePost(pageUrl);
+    } catch (err) {
+      // An image on an archive or the home page without a bridge has no post
+      // content to edit; its alt can only come from the media item.
+      if (!(err instanceof ConnectorError) || !["post_not_found", "home_page_unsupported"].includes(err.code)) throw err;
+    }
+    if (post) {
+      const raw = await postContent(post);
+      const alts = imgTags(raw, src, base).map((t) => t.alt);
+      if (alts.length > 0) {
+        if (new Set(alts).size > 1) {
+          throw new ConnectorError("image_ambiguous", `The image ${src} appears in post ${post.id} with different alt texts; edit it by hand.`);
+        }
+        return { kind: "content", post, raw, alt: alts[0]! };
+      }
+    }
+    return { kind: "media", media: await resolveMedia(src) };
+  }
+
+  /** The one media item that owns `src` as its original or one of its sizes. Never a guess. */
+  async function resolveMedia(src: string): Promise<WpMedia> {
+    const wanted = comparableUrl(src);
+    const stem = fileStem(src);
+    if (!wanted || !stem) throw new ConnectorError("media_not_found", `No media item matches ${src}`);
+    const res = await api<WpMedia[]>(`wp/v2/media?search=${encodeURIComponent(stem)}&per_page=100&context=edit`);
+    if (res.status >= 400 || !Array.isArray(res.data)) {
+      throw new ConnectorError(`http_${res.status}`, `Media lookup failed for ${src}`);
+    }
+    const hits = res.data.filter((m) =>
+      [m.source_url, ...Object.values(m.media_details?.sizes ?? {}).map((s) => s.source_url)]
+        .some((u) => u && comparableUrl(u) === wanted),
+    );
+    if (hits.length === 0) throw new ConnectorError("media_not_found", `No media item has the address ${src}`);
+    if (hits.length > 1) throw new ConnectorError("media_ambiguous", `${hits.length} media items have the address ${src}`);
+    return hits[0]!;
+  }
+
+  // ---- read / write ---------------------------------------------------------
 
   async function read(req: Pick<WriteRequest, "url" | "field" | "selector">): Promise<string | null> {
-    const caps = await capabilities();
-    if (req.field === "img.alt" && req.selector) {
-      const media = await resolveMedia(req.selector);
-      return media.alt_text ?? null;
+    const { bridge } = await probeCapabilities();
+    if (req.field === "img.alt") {
+      if (!req.selector) throw new ConnectorError("missing_selector", "An alt-text change must name the image.");
+      const loc = await locateImage(req.url, req.selector);
+      return loc.kind === "content" ? loc.alt : emptyToNull(loc.media.alt_text);
     }
-    if (caps.writableFields.includes(req.field) && caps.writableFields.includes("meta_description")) {
+    if (!bridge) throw new ConnectorError("unsupported_field", `WordPress cannot read "${req.field}" without the bridge plugin.`);
+    if (req.field === "redirect") {
+      const res = await api<{ to?: string | null }>(`${BRIDGE_NS}/redirects?from=${encodeURIComponent(req.url)}`);
+      if (res.status >= 400 || !res.data) throw new ConnectorError(`http_${res.status}`, res.text.slice(0, 300));
+      return emptyToNull(res.data.to);
+    }
+    if (BRIDGE_POST_FIELDS.includes(req.field)) {
       const post = await resolvePost(req.url);
-      const res = await httpJson<Record<string, string | null>>(
-        `${base}/wp-json/${BRIDGE_NS}/seo?post=${post.id}`,
-        { headers },
-      );
-      return res.data?.[req.field] ?? null;
+      const res = await api<Record<string, string | null>>(`${BRIDGE_NS}/seo?post=${post.id}`);
+      if (res.status >= 400 || !res.data) throw new ConnectorError(`http_${res.status}`, res.text.slice(0, 300));
+      return emptyToNull(res.data[req.field]);
     }
-    if (req.field === "title" || req.field === "post_title") {
-      const post = await resolvePost(req.url);
-      return post.title?.raw ?? post.title?.rendered ?? null;
-    }
-    return null;
+    throw new ConnectorError("unsupported_field", `The WordPress connector cannot read "${req.field}".`);
   }
 
   async function write(req: WriteRequest): Promise<WriteResult> {
-    const fail = (code: string, error: string): WriteResult => ({
+    const fail = (code: string, error: string): WriteResult => ({ url: req.url, field: req.field, ok: false, code, error });
+    const done = (applied: string | null, previous: string | null): WriteResult => ({
       url: req.url,
       field: req.field,
-      ok: false,
-      code,
-      error,
+      ok: true,
+      applied,
+      previous,
     });
 
     try {
-      const caps = await capabilities();
-      const viaBridge = caps.notes.some((n) => n.startsWith("SEO Table bridge plugin detected"));
+      const { bridge } = await probeCapabilities();
 
       if (req.field === "img.alt") {
         if (!req.selector) return fail("missing_selector", "An alt-text change must name the image.");
-        const media = await resolveMedia(req.selector);
-        const previous = media.alt_text ?? null;
-        const res = await httpJson<WpMedia>(`${base}/wp-json/wp/v2/media/${media.id}`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ alt_text: req.after }),
-        });
-        if (res.status >= 400) return fail(`http_${res.status}`, res.text.slice(0, 300));
-        return { url: req.url, field: req.field, ok: true, applied: res.data?.alt_text ?? req.after, previous };
-      }
-
-      if (["meta_description", "canonical", "meta_robots", "redirect"].includes(req.field) || (req.field === "title" && viaBridge)) {
-        if (!viaBridge) {
-          return fail(
-            "unsupported_field",
-            `WordPress cannot write "${req.field}" over the core REST API. Install the SEO Table bridge plugin (packages/connectors/wordpress-plugin) to enable it.`,
-          );
+        const loc = await locateImage(req.url, req.selector);
+        if (loc.kind === "content") {
+          const content = setImgAlt(loc.raw, req.selector, base, req.after);
+          const res = await api<WpPost>(`${loc.post.restNamespace}/${loc.post.restBase}/${loc.post.id}`, {
+            method: "POST",
+            body: JSON.stringify({ content }),
+          });
+          if (res.status >= 400) return fail(`http_${res.status}`, res.text.slice(0, 300));
+          return done(req.after, loc.alt);
         }
-        const post = req.field === "redirect" ? null : await resolvePost(req.url);
-        const body = post
-          ? { post: post.id, field: req.field, value: req.after }
-          : { field: "redirect", from: req.url, to: req.after, status: 301 };
-        const res = await httpJson<{ ok?: boolean; previous?: string | null; value?: string | null }>(
-          `${base}/wp-json/${BRIDGE_NS}/seo`,
-          { method: "POST", headers, body: JSON.stringify(body) },
-        );
-        if (res.status >= 400 || !res.data?.ok) return fail(`http_${res.status}`, res.text.slice(0, 300));
-        return {
-          url: req.url,
-          field: req.field,
-          ok: true,
-          applied: res.data.value ?? req.after,
-          previous: res.data.previous ?? req.before,
-        };
-      }
-
-      if (req.field === "title" || req.field === "post_title") {
-        const post = await resolvePost(req.url);
-        const previous = post.title?.raw ?? post.title?.rendered ?? null;
-        const res = await httpJson<WpPost>(`${base}/wp-json/wp/v2/${post.type ?? "posts"}/${post.id}`, {
+        const res = await api<WpMedia>(`wp/v2/media/${loc.media.id}`, {
           method: "POST",
-          headers,
-          body: JSON.stringify({ title: req.after }),
+          body: JSON.stringify({ alt_text: req.after ?? "" }),
         });
         if (res.status >= 400) return fail(`http_${res.status}`, res.text.slice(0, 300));
-        return {
-          url: req.url,
-          field: req.field,
-          ok: true,
-          applied: res.data?.title?.raw ?? req.after,
-          previous,
-        };
+        return done(emptyToNull(res.data?.alt_text ?? req.after), emptyToNull(loc.media.alt_text));
       }
 
-      return fail("unsupported_field", `The WordPress connector cannot write "${req.field}".`);
+      if (!bridge || (req.field !== "redirect" && !BRIDGE_POST_FIELDS.includes(req.field))) {
+        return fail(
+          "unsupported_field",
+          `WordPress cannot write "${req.field}" over the core REST API. Install the SEO Table bridge plugin (packages/connectors/wordpress-plugin) to enable it.`,
+        );
+      }
+
+      type BridgeWrite = { ok?: boolean; previous?: string | null; value?: string | null };
+      let res;
+      if (req.field === "redirect") {
+        res =
+          req.after === null
+            ? await api<BridgeWrite>(`${BRIDGE_NS}/redirects?from=${encodeURIComponent(req.url)}`, { method: "DELETE" })
+            : await api<BridgeWrite>(`${BRIDGE_NS}/redirects`, {
+                method: "POST",
+                body: JSON.stringify({ from: req.url, to: req.after, status: 301 }),
+              });
+      } else {
+        const post = await resolvePost(req.url);
+        res =
+          req.after === null
+            ? await api<BridgeWrite>(`${BRIDGE_NS}/seo?post=${post.id}&field=${encodeURIComponent(req.field)}`, {
+                method: "DELETE",
+              })
+            : await api<BridgeWrite>(`${BRIDGE_NS}/seo`, {
+                method: "POST",
+                body: JSON.stringify({ post: post.id, field: req.field, value: req.after }),
+              });
+      }
+      if (res.status >= 400 || !res.data?.ok) return fail(`http_${res.status}`, res.text.slice(0, 300));
+      return done(emptyToNull(res.data.value), emptyToNull(res.data.previous));
     } catch (err) {
       if (err instanceof ConnectorError) return fail(err.code, err.message);
       return fail("network_error", (err as Error).message);
@@ -344,11 +465,116 @@ export function wordpress(creds: WordPressCredentials): Connector {
   return { kind: "WORDPRESS", check, capabilities, write, read };
 }
 
+// ---- helpers ------------------------------------------------------------------
+
+function emptyToNull(v: string | null | undefined): string | null {
+  return v === undefined || v === null || v === "" ? null : v;
+}
+
+function versionAtLeast(version: string, min: readonly number[]): boolean {
+  const parts = version.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < min.length; i++) {
+    const a = parts[i] ?? 0;
+    if (a !== min[i]) return a > min[i]!;
+  }
+  return true;
+}
+
+/**
+ * A URL reduced to what identifies a WordPress resource: the percent-decoded
+ * path without a trailing slash, plus the query string with its parameters
+ * sorted (plain permalinks are `/?p=123`). Scheme, host and fragment are left
+ * out; the host is checked separately.
+ */
+export function comparableUrl(url: string, relativeTo?: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url, relativeTo);
+  } catch {
+    return null;
+  }
+  let path = u.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    /* a malformed escape is compared as written */
+  }
+  path = path.replace(/\/+$/, "") || "/";
+  const params = [...u.searchParams.entries()].sort(([a, av], [b, bv]) => (a === b ? av.localeCompare(bv) : a.localeCompare(b)));
+  const query = params.length ? `?${new URLSearchParams(params).toString()}` : "";
+  return path + query;
+}
+
+/** Same site, allowing for the www/non-www and http/https variants of one install. */
+function sameSite(url: string, base: string): boolean {
+  try {
+    const host = (h: string) => h.toLowerCase().replace(/^www\./, "");
+    return host(new URL(url).host) === host(new URL(base).host);
+  } catch {
+    return false;
+  }
+}
+
 function lastSegment(url: string): string {
   try {
     const parts = new URL(url).pathname.split("/").filter(Boolean);
     return decodeURIComponent(parts[parts.length - 1] ?? "");
   } catch {
-    return url;
+    return "";
   }
+}
+
+/** The media title WordPress derives from a file: no extension, no -WxH size, no -scaled. */
+function fileStem(src: string): string {
+  return lastSegment(src)
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/-\d+x\d+$/, "")
+    .replace(/-scaled$/, "");
+}
+
+const IMG_TAG = /<img\b[^>]*>/gi;
+const ATTR = (name: string) => new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i");
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&quot;|&#0*34;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function attr(tag: string, name: string): string | null {
+  const m = ATTR(name).exec(tag);
+  return m ? decodeEntities(m[1] ?? m[2] ?? m[3] ?? "") : null;
+}
+
+/** The <img> tags in `html` whose src is `src`, with their current alt (null when absent). */
+export function imgTags(html: string, src: string, base: string): Array<{ tag: string; alt: string | null }> {
+  const wanted = comparableUrl(src, base);
+  const out: Array<{ tag: string; alt: string | null }> = [];
+  for (const tag of html.match(IMG_TAG) ?? []) {
+    const tagSrc = attr(tag, "src");
+    if (tagSrc && comparableUrl(tagSrc, base) === wanted) out.push({ tag, alt: attr(tag, "alt") });
+  }
+  return out;
+}
+
+/**
+ * Set (or with null, remove) the alt attribute of every <img> whose src is
+ * `src`, leaving every other byte of the content exactly as it was.
+ */
+export function setImgAlt(html: string, src: string, base: string, alt: string | null): string {
+  const wanted = comparableUrl(src, base);
+  return html.replace(IMG_TAG, (tag) => {
+    const tagSrc = attr(tag, "src");
+    if (!tagSrc || comparableUrl(tagSrc, base) !== wanted) return tag;
+    const stripped = tag.replace(ATTR("alt"), "");
+    if (alt === null) return stripped;
+    return stripped.replace(/^<img\b/i, `<img alt="${escapeAttr(alt)}"`);
+  });
 }

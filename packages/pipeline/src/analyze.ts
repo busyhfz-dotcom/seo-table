@@ -2,14 +2,21 @@
  * The analysis stage of a run: crawl → snapshots → rules → issues → score.
  *
  * Retry safety: a retried job re-uses the same run row. Snapshots are upserted on
- * (run, url) and occurrences are inserted with onConflictDoNothing, so a second
- * attempt converges on the same state instead of doubling it.
+ * (run, url), occurrences are inserted with onConflictDoNothing, and a proposal
+ * is not drafted again for a change an open proposal already carries, so a
+ * second attempt converges on the same state instead of doubling it.
+ *
+ * Liveness: the run's heartbeat is refreshed on a timer for as long as the job
+ * works, not only when a page completes — a polite crawl with a long
+ * Crawl-delay can go minutes between pages and must not look dead to the reaper.
  */
 import {
   and,
   auditRuns,
   db,
   eq,
+  fixProposals,
+  inArray,
   pageSnapshots,
   projects,
   seoIssues,
@@ -19,18 +26,23 @@ import {
   type Project,
 } from "@seo/db";
 import {
+  BlockedAddressError,
   childLogger,
   computeScore,
   crawl,
+  env,
   issueService,
   metric,
   proposalService,
   resolveRedirects,
   runRules,
+  scanService,
   type AnalyzedPage,
   type CrawlResult,
   type ScoreBreakdown,
 } from "@seo/core";
+
+type ProposalDraft = ReturnType<typeof proposalService.draftsFromGroups>[number];
 
 export type AnalyzeOutcome = {
   runId: string;
@@ -40,7 +52,18 @@ export type AnalyzeOutcome = {
   issues: Awaited<ReturnType<typeof issueService.persistFindings>>;
   proposals: number;
   canceled: boolean;
+  /**
+   * The run was not QUEUED or RUNNING when the job picked it up (already
+   * finished, failed or reaped), so nothing was done. The worker must not run
+   * the agent for it.
+   */
+  skipped: boolean;
 };
+
+/** How often the run's heartbeat is refreshed while the job works. */
+const HEARTBEAT_EVERY_MS = 30_000;
+/** Rows per multi-row INSERT; well under Postgres' 65535 bind-parameter limit. */
+const INSERT_CHUNK = 200;
 
 export async function analyze(runId: string, signal?: AbortSignal): Promise<AnalyzeOutcome> {
   const log = childLogger({ component: "analyze", runId });
@@ -52,15 +75,44 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
   )[0];
   if (!project) throw new Error(`Project ${run.projectId} not found`);
 
-  if (run.status === "CANCELED") {
-    log.info("run was cancelled before it started");
-    return emptyOutcome(runId, true);
+  // Claimed with a conditional update: a duplicate or late job for a run that
+  // is finished, cancelled or reaped must not bring it back to life.
+  const started = await db
+    .update(auditRuns)
+    .set({
+      status: "RUNNING",
+      startedAt: run.startedAt ?? new Date(),
+      heartbeatAt: new Date(),
+      attempts: sql`${auditRuns.attempts} + 1`,
+    })
+    .where(and(eq(auditRuns.id, runId), inArray(auditRuns.status, ["QUEUED", "RUNNING"])))
+    .returning({ id: auditRuns.id });
+  if (started.length === 0) {
+    const status = (await db.select({ status: auditRuns.status }).from(auditRuns).where(eq(auditRuns.id, runId)))[0]?.status;
+    log.info({ status }, "run is not active; nothing to do");
+    return emptyOutcome(runId, status === "CANCELED", true);
   }
 
-  await db
-    .update(auditRuns)
-    .set({ status: "RUNNING", startedAt: run.startedAt ?? new Date(), attempts: run.attempts + 1 })
-    .where(eq(auditRuns.id, runId));
+  const beat = () =>
+    scanService.heartbeat(runId).catch((err: unknown) => log.warn({ err: (err as Error).message }, "heartbeat failed"));
+  const heartbeat = setInterval(beat, HEARTBEAT_EVERY_MS);
+  heartbeat.unref();
+  try {
+    return await analyzeRun(run, project, log, beat, signal);
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+async function analyzeRun(
+  run: AuditRun,
+  project: Project,
+  log: ReturnType<typeof childLogger>,
+  beat: () => Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<AnalyzeOutcome> {
+  const runId = run.id;
+  const userAgent = env().CRAWLER_USER_AGENT;
 
   // ---- crawl -------------------------------------------------------------
   let lastProgressWrite = 0;
@@ -68,8 +120,10 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
     baseUrl: project.baseUrl,
     pageCap: project.pageCap,
     requestsPerSecond: project.crawlRate,
+    userAgent,
     ...(signal ? { signal } : {}),
     onProgress: async (done, queued) => {
+      void beat();
       // Throttled so progress does not turn into a write per page.
       if (Date.now() - lastProgressWrite < 2000) return;
       lastProgressWrite = Date.now();
@@ -82,7 +136,7 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
 
   if (await wasCanceled(runId)) {
     log.info("run cancelled during crawl");
-    return emptyOutcome(runId, true);
+    return emptyOutcome(runId, true, false);
   }
 
   // ---- persist snapshots -------------------------------------------------
@@ -167,23 +221,21 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
   }
 
   const snapshotIdByUrl = new Map<string, string>();
-  for (const chunk of chunks([...deduped.values()], 200)) {
+  for (const chunk of chunks([...deduped.values()], INSERT_CHUNK)) {
     const written = await db
       .insert(pageSnapshots)
       .values(chunk)
       .onConflictDoUpdate({
         target: [pageSnapshots.auditRunId, pageSnapshots.normalizedUrl],
-        set: {
-          statusCode: sqlExcluded("status_code"),
-          title: sqlExcluded("title"),
-          internalLinksIn: sqlExcluded("internal_links_in"),
-          indexable: sqlExcluded("indexable"),
-          fetchedAt: new Date(),
-        },
+        // A retry re-crawled the page: every observed column takes the new value.
+        set: Object.fromEntries(
+          SNAPSHOT_REFRESH_COLUMNS.map((key) => [key, sqlExcluded(pageSnapshots[key].name)]),
+        ),
       })
       .returning({ id: pageSnapshots.id, normalizedUrl: pageSnapshots.normalizedUrl });
     for (const row of written) snapshotIdByUrl.set(row.normalizedUrl, row.id);
   }
+  await beat();
 
   // ---- rules -------------------------------------------------------------
   const { findings, groups, perRule } = runRules({
@@ -191,6 +243,7 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
     pages: analyzed,
     sitemapUrls: crawlResult.sitemapUrls,
     robots: crawlResult.robots,
+    userAgent,
   });
 
   const issues = await issueService.persistFindings({
@@ -207,7 +260,10 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
     .where(eq(seoIssues.projectId, project.id));
   const issueIdByFingerprint = new Map(issueRows.map((r) => [r.fingerprint, r.id]));
 
-  const drafts = proposalService.draftsFromGroups(project.id, groups, issueIdByFingerprint);
+  const drafts = await withoutOpenDuplicates(
+    project.id,
+    proposalService.draftsFromGroups(project.id, groups, issueIdByFingerprint),
+  );
   const created = await proposalService.createProposals({
     orgId: project.orgId,
     actor: { type: "AGENT", id: "agent" },
@@ -217,6 +273,7 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
   // ---- score -------------------------------------------------------------
   const breakdown = computeScore(analyzed, findings);
 
+  // Conditional: a run cancelled while the rules ran stays cancelled.
   await db
     .update(auditRuns)
     .set({
@@ -229,7 +286,7 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
       error: null,
       errorCode: null,
     })
-    .where(eq(auditRuns.id, runId));
+    .where(and(eq(auditRuns.id, runId), eq(auditRuns.status, "RUNNING")));
 
   await db.update(projects).set({ score: breakdown.score }).where(eq(projects.id, project.id));
 
@@ -248,21 +305,71 @@ export async function analyze(runId: string, signal?: AbortSignal): Promise<Anal
     issues,
     proposals: created.length,
     canceled: false,
+    skipped: false,
   };
 }
 
-export async function markRunFailed(runId: string, err: unknown, dead: boolean): Promise<void> {
+/**
+ * An error no retry can fix: the target itself is refused. The worker should
+ * fail such a job without retrying (BullMQ's UnrecoverableError).
+ */
+export function isPermanentFailure(err: unknown): boolean {
+  return err instanceof BlockedAddressError;
+}
+
+/**
+ * Record a failed attempt. When a retry will follow (`dead === false`) the run
+ * goes back to QUEUED with the error kept for display — it still holds the
+ * project's one active-run slot, so no second scan can start in between. Only
+ * the final attempt, or a permanent failure, ends the run as DEAD_LETTER.
+ * Returns whether the run is now final.
+ */
+export async function markRunFailed(runId: string, err: unknown, dead: boolean): Promise<{ final: boolean }> {
   const message = err instanceof Error ? err.message : String(err);
+  const permanent = isPermanentFailure(err);
+  const final = dead || permanent;
+  const errorCode = permanent ? "BLOCKED_ADDRESS" : final ? "RETRIES_EXHAUSTED" : "ATTEMPT_FAILED";
   await db
     .update(auditRuns)
-    .set({
-      status: dead ? "DEAD_LETTER" : "FAILED",
-      error: message.slice(0, 2000),
-      errorCode: dead ? "RETRIES_EXHAUSTED" : "ATTEMPT_FAILED",
-      finishedAt: new Date(),
-    })
-    .where(eq(auditRuns.id, runId));
-  metric(dead ? "run.dead_letter" : "run.failed");
+    .set(
+      final
+        ? { status: "DEAD_LETTER", error: message.slice(0, 2000), errorCode, finishedAt: new Date() }
+        : { status: "QUEUED", error: message.slice(0, 2000), errorCode },
+    )
+    // A run already finished or cancelled keeps its outcome.
+    .where(and(eq(auditRuns.id, runId), inArray(auditRuns.status, ["QUEUED", "RUNNING"])));
+  metric(final ? "run.dead_letter" : "run.attempt_failed");
+  return { final };
+}
+
+/**
+ * Drop changes an open proposal already carries, so a retried or repeated run
+ * does not queue the same fix twice. Keyed per change, since a proposal groups
+ * many.
+ */
+async function withoutOpenDuplicates(
+  projectId: string,
+  drafts: ProposalDraft[],
+): Promise<ProposalDraft[]> {
+  if (drafts.length === 0) return drafts;
+  const open = await db
+    .select({ ruleId: fixProposals.ruleId, action: fixProposals.action, changes: fixProposals.changes })
+    .from(fixProposals)
+    .where(
+      and(
+        eq(fixProposals.projectId, projectId),
+        inArray(fixProposals.status, ["DRAFT", "AWAITING_APPROVAL", "APPROVED", "APPLYING"]),
+      ),
+    );
+  const key = (ruleId: string, action: string, c: { url: string; selector?: string }) =>
+    JSON.stringify([ruleId, action, c.url, c.selector ?? null]);
+  const taken = new Set<string>();
+  for (const p of open) {
+    for (const c of (p.changes as Array<{ url: string; selector?: string }>) ?? []) taken.add(key(p.ruleId, p.action, c));
+  }
+  return drafts
+    .map((d) => ({ ...d, changes: d.changes.filter((c) => !taken.has(key(d.ruleId, d.action, c))) }))
+    .filter((d) => d.changes.length > 0);
 }
 
 async function wasCanceled(runId: string): Promise<boolean> {
@@ -274,7 +381,7 @@ async function wasCanceled(runId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-function emptyOutcome(runId: string, canceled: boolean): AnalyzeOutcome {
+function emptyOutcome(runId: string, canceled: boolean, skipped: boolean): AnalyzeOutcome {
   return {
     runId,
     pagesCrawled: 0,
@@ -289,12 +396,44 @@ function emptyOutcome(runId: string, canceled: boolean): AnalyzeOutcome {
     },
     proposals: 0,
     canceled,
+    skipped,
   };
 }
 
 function* chunks<T>(items: T[], size: number): Generator<T[]> {
   for (let i = 0; i < items.length; i += size) yield items.slice(i, i + size);
 }
+
+/** Everything a crawl observes about a page; ids, keys and the run link are left alone. */
+const SNAPSHOT_REFRESH_COLUMNS = [
+  "url",
+  "depth",
+  "statusCode",
+  "responseMs",
+  "contentHash",
+  "bodyBytes",
+  "title",
+  "titleLength",
+  "metaDescription",
+  "metaDescriptionLength",
+  "h1s",
+  "canonical",
+  "robotsMeta",
+  "xRobotsTag",
+  "indexable",
+  "noindexReason",
+  "lang",
+  "wordCount",
+  "imagesTotal",
+  "imagesMissingAlt",
+  "internalLinksOut",
+  "internalLinksIn",
+  "externalLinksOut",
+  "inSitemap",
+  "redirectChain",
+  "redirectTarget",
+  "fetchedAt",
+] as const;
 
 /** `excluded.<column>` reference for an upsert's SET clause. */
 function sqlExcluded(column: string) {

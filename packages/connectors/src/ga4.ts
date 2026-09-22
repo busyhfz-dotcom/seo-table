@@ -2,7 +2,7 @@
  * GA4 connector — Analytics Data API v1beta, read-only.
  *
  * Used to tell the difference between a page that ranks and a page that earns:
- * sessions and conversions per landing page, joined to snapshots by URL path.
+ * sessions and key events per landing page, joined to snapshots by URL path.
  */
 import { accessToken, SCOPES, type GoogleCredentials } from "./google-auth.js";
 import {
@@ -22,12 +22,15 @@ export type Ga4Credentials = {
 };
 
 export type PageMetrics = {
+  /** Landing page path without the query string, so it joins to snapshots by path. */
   path: string;
   sessions: number;
   users: number;
   engagedSessions: number;
-  conversions: number;
-  averageEngagementSeconds: number;
+  /** GA4 renamed "conversions" to key events; the old metric is deprecated. */
+  keyEvents: number;
+  /** averageSessionDuration: mean session length in seconds (not engagement time). */
+  averageSessionDurationSeconds: number;
 };
 
 export function ga4(creds: Ga4Credentials): Connector & {
@@ -42,7 +45,7 @@ export function ga4(creds: Ga4Credentials): Connector & {
     return {
       writableFields: [],
       supportedActions: [],
-      notes: ["Read-only. Supplies sessions, engagement and conversions per landing page."],
+      notes: ["Read-only. Supplies sessions, engagement and key events per landing page."],
     };
   }
 
@@ -81,12 +84,12 @@ export function ga4(creds: Ga4Credentials): Connector & {
       headers: await headers(),
       body: JSON.stringify({
         dateRanges: [{ startDate: iso(range.start), endDate: iso(range.end) }],
-        dimensions: [{ name: "landingPagePlusQueryString" }],
+        dimensions: [{ name: "landingPage" }],
         metrics: [
           { name: "sessions" },
           { name: "totalUsers" },
           { name: "engagedSessions" },
-          { name: "conversions" },
+          { name: "keyEvents" },
           { name: "averageSessionDuration" },
         ],
         limit,
@@ -104,8 +107,8 @@ export function ga4(creds: Ga4Credentials): Connector & {
       sessions: num(row.metricValues?.[0]?.value),
       users: num(row.metricValues?.[1]?.value),
       engagedSessions: num(row.metricValues?.[2]?.value),
-      conversions: num(row.metricValues?.[3]?.value),
-      averageEngagementSeconds: num(row.metricValues?.[4]?.value),
+      keyEvents: num(row.metricValues?.[3]?.value),
+      averageSessionDurationSeconds: num(row.metricValues?.[4]?.value),
     }));
   }
 

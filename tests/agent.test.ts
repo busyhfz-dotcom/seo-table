@@ -185,7 +185,8 @@ describe("low-risk fix: dry run, apply, rollback", () => {
       .select()
       .from(fixExecutions)
       .where(eq(fixExecutions.id, out.executionId));
-    expect((exec?.snapshot as Array<{ previous: string | null }>)[0]?.previous).toBe("");
+    // The alt was empty; empty is recorded as null (and restored by clearing it).
+    expect((exec?.snapshot as Array<{ previous: string | null }>)[0]?.previous).toBeNull();
   });
 
   it("applying twice is refused", async () => {
@@ -287,6 +288,6 @@ describe("agent mode", () => {
     await proposalService.decide({ proposalId: p.id, orgId, actor: { type: "USER", id: "admin-1" }, approve: true });
     const out = await execute({ proposalId: p.id, dryRun: false, actor: { type: "USER", id: "admin-1" } });
     expect(out.applied).toBe(1);
-    expect(wp.redirects.get(`${wp.baseUrl}/legacy`)).toBe(`${wp.baseUrl}/shop`);
+    expect(wp.redirects.get("/legacy")).toBe(`${wp.baseUrl}/shop`);
   });
 });

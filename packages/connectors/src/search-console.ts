@@ -32,7 +32,22 @@ export type QueryRow = {
   position: number;
 };
 
-export type Opportunity = QueryRow & { gap: Severity; suggestedAction: string };
+/** Stable machine codes for the suggestion; the UI translates them, the English text is a fallback. */
+export type SuggestedActionCode =
+  | "create_or_index_page"
+  | "rewrite_title_and_meta"
+  | "expand_content_and_links"
+  | "test_clearer_title"
+  | "none";
+
+export type Opportunity = QueryRow & {
+  gap: Severity;
+  suggestedAction: string;
+  suggestedActionCode: SuggestedActionCode;
+};
+
+/** The API's hard maximum rows per request; larger sets page with startRow. */
+const PAGE_ROWS = 25_000;
 
 async function auth(creds: SearchConsoleCredentials): Promise<Record<string, string>> {
   const token = await accessToken(creds.google, [...SCOPES.searchConsole]);
@@ -42,7 +57,7 @@ async function auth(creds: SearchConsoleCredentials): Promise<Record<string, str
 export function searchConsole(creds: SearchConsoleCredentials): Connector & {
   queries: (range: { start: Date; end: Date }, limit?: number) => Promise<QueryRow[]>;
   opportunities: (range: { start: Date; end: Date }) => Promise<Opportunity[]>;
-  indexedPages: (range: { start: Date; end: Date }) => Promise<Set<string>>;
+  indexedPages: (range: { start: Date; end: Date }, limit?: number) => Promise<Set<string>>;
 } {
   async function capabilities(): Promise<ConnectorCapabilities> {
     return {
@@ -85,12 +100,21 @@ export function searchConsole(creds: SearchConsoleCredentials): Connector & {
     }
   }
 
-  async function queries(range: { start: Date; end: Date }, limit = 1000): Promise<QueryRow[]> {
+  /**
+   * Page through searchAnalytics/query until `limit` rows or the data runs out.
+   * dataState "all" includes the fresh (not yet finalised) days, which is what
+   * the last-28-days window the product shows is made of.
+   */
+  async function queryPages(
+    range: { start: Date; end: Date },
+    dimensions: string[],
+    limit: number,
+    onRow: (row: { keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }) => void,
+  ): Promise<void> {
     const headers = await auth(creds);
-    const rows: QueryRow[] = [];
     let startRow = 0;
-
-    for (;;) {
+    while (startRow < limit) {
+      const rowLimit = Math.min(PAGE_ROWS, limit - startRow);
       const res = await httpJson<{
         rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }>;
       }>(`${API}/sites/${encodeURIComponent(creds.siteUrl)}/searchAnalytics/query`, {
@@ -99,10 +123,10 @@ export function searchConsole(creds: SearchConsoleCredentials): Connector & {
         body: JSON.stringify({
           startDate: iso(range.start),
           endDate: iso(range.end),
-          dimensions: ["query", "page"],
-          rowLimit: Math.min(25_000, limit - rows.length),
+          dimensions,
+          rowLimit,
           startRow,
-          dataState: "final",
+          dataState: "all",
         }),
         timeoutMs: 40_000,
       });
@@ -111,19 +135,25 @@ export function searchConsole(creds: SearchConsoleCredentials): Connector & {
         throw new ConnectorError(`http_${res.status}`, `Search Console query failed: ${res.text.slice(0, 200)}`);
       }
       const batch = res.data?.rows ?? [];
-      for (const row of batch) {
-        rows.push({
-          query: row.keys?.[0] ?? "",
-          page: row.keys?.[1] ?? null,
-          impressions: row.impressions ?? 0,
-          clicks: row.clicks ?? 0,
-          ctr: row.ctr ?? 0,
-          position: row.position ?? 0,
-        });
-      }
+      for (const row of batch) onRow(row);
       startRow += batch.length;
-      if (batch.length === 0 || rows.length >= limit) break;
+      // A short page is the last one.
+      if (batch.length < rowLimit) break;
     }
+  }
+
+  async function queries(range: { start: Date; end: Date }, limit = 1000): Promise<QueryRow[]> {
+    const rows: QueryRow[] = [];
+    await queryPages(range, ["query", "page"], limit, (row) => {
+      rows.push({
+        query: row.keys?.[0] ?? "",
+        page: row.keys?.[1] ?? null,
+        impressions: row.impressions ?? 0,
+        clicks: row.clicks ?? 0,
+        ctr: row.ctr ?? 0,
+        position: row.position ?? 0,
+      });
+    });
     return rows;
   }
 
@@ -158,60 +188,55 @@ export function searchConsole(creds: SearchConsoleCredentials): Connector & {
     const out: Opportunity[] = [];
     for (const row of byQuery.values()) {
       if (row.impressions < 50) continue;
-      const { gap, suggestedAction } = classify(row);
+      const { gap, suggestedAction, suggestedActionCode } = classify(row);
       if (gap === "INFO") continue;
-      out.push({ ...row, gap, suggestedAction });
+      out.push({ ...row, gap, suggestedAction, suggestedActionCode });
     }
     return out.sort((a, b) => b.impressions - a.impressions);
   }
 
-  async function indexedPages(range: { start: Date; end: Date }): Promise<Set<string>> {
-    const headers = await auth(creds);
-    const res = await httpJson<{ rows?: Array<{ keys?: string[] }> }>(
-      `${API}/sites/${encodeURIComponent(creds.siteUrl)}/searchAnalytics/query`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          startDate: iso(range.start),
-          endDate: iso(range.end),
-          dimensions: ["page"],
-          rowLimit: 25_000,
-        }),
-        timeoutMs: 40_000,
-      },
-    );
-    if (res.status >= 400) throw new ConnectorError(`http_${res.status}`, res.text.slice(0, 200));
-    return new Set((res.data?.rows ?? []).map((r) => r.keys?.[0] ?? "").filter(Boolean));
+  async function indexedPages(range: { start: Date; end: Date }, limit = 200_000): Promise<Set<string>> {
+    const pages = new Set<string>();
+    await queryPages(range, ["page"], limit, (row) => {
+      if (row.keys?.[0]) pages.add(row.keys[0]);
+    });
+    return pages;
   }
 
   return { kind: "SEARCH_CONSOLE", check, capabilities, queries, opportunities, indexedPages };
 }
 
 /** Explainable buckets — each one names the actual shape of the gap. */
-function classify(row: QueryRow): { gap: Severity; suggestedAction: string } {
+function classify(row: QueryRow): { gap: Severity; suggestedAction: string; suggestedActionCode: SuggestedActionCode } {
   if (row.position > 15 && row.impressions >= 500) {
     return {
       gap: "CRITICAL",
+      suggestedActionCode: "create_or_index_page",
       suggestedAction: "High demand but ranking past page one — check whether a page for this query exists and is indexable",
     };
   }
   if (row.position <= 10 && row.ctr < 0.02 && row.impressions >= 300) {
     return {
       gap: "SERIOUS",
+      suggestedActionCode: "rewrite_title_and_meta",
       suggestedAction: "Ranks on page one but is rarely clicked — rewrite the title and meta description",
     };
   }
   if (row.position > 10 && row.position <= 15) {
     return {
       gap: "SERIOUS",
+      suggestedActionCode: "expand_content_and_links",
       suggestedAction: "Just below page one — expand the content and add internal links",
     };
   }
   if (row.position <= 5 && row.ctr < 0.05) {
-    return { gap: "WARNING", suggestedAction: "Strong position, weak click-through — test a clearer title" };
+    return {
+      gap: "WARNING",
+      suggestedAction: "Strong position, weak click-through — test a clearer title",
+      suggestedActionCode: "test_clearer_title",
+    };
   }
-  return { gap: "INFO", suggestedAction: "No action needed" };
+  return { gap: "INFO", suggestedAction: "No action needed", suggestedActionCode: "none" };
 }
 
 function iso(d: Date): string {

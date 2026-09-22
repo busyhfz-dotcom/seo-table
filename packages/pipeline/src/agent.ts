@@ -12,6 +12,10 @@
  * refuses an agent actor for non-LOW risk, and the database refuses to move a
  * restricted proposal to APPLYING without an approval row. Three independent
  * layers, because this is the part of the product that can damage a live site.
+ *
+ * The agent reports problems, it never throws them at the caller: whatever
+ * happens here (an unreachable site, a refused write) is recorded per proposal
+ * and must not change the status of the scan that ran before it.
  */
 import { and, db, eq, fixProposals, inArray, projects } from "@seo/db";
 import {
@@ -22,7 +26,7 @@ import {
   recordAudit,
   ALWAYS_APPROVAL,
 } from "@seo/core";
-import { forProjectOrNull } from "@seo/connectors";
+import { forProjectOrNull, type ConnectorCapabilities } from "@seo/connectors";
 import { execute } from "./execute.js";
 
 export type AgentReport = {
@@ -58,7 +62,16 @@ export async function runAgent(projectId: string): Promise<AgentReport> {
   report.considered = candidates.length;
 
   const connector = await forProjectOrNull(projectId, "WORDPRESS");
-  const capabilities = connector ? await connector.capabilities() : null;
+  let capabilities: ConnectorCapabilities | null = null;
+  let connectorError: string | null = null;
+  if (connector) {
+    try {
+      capabilities = await connector.capabilities();
+    } catch (err) {
+      connectorError = `connector_unreachable: ${(err as Error).message}`.slice(0, 120);
+      log.warn({ err: (err as Error).message }, "could not probe the connected site");
+    }
+  }
 
   for (const proposal of candidates) {
     // A restricted action is never even attempted — not as a dry run with a
@@ -69,7 +82,7 @@ export async function runAgent(projectId: string): Promise<AgentReport> {
     }
 
     if (!connector || !capabilities) {
-      report.skipped.push({ proposalId: proposal.id, reason: "no_connector" });
+      report.skipped.push({ proposalId: proposal.id, reason: connectorError ?? "no_connector" });
       continue;
     }
     if (!capabilities.supportedActions.includes(proposal.action)) {
@@ -97,7 +110,9 @@ export async function runAgent(projectId: string): Promise<AgentReport> {
         targetType: "fix_proposal",
         targetId: proposal.id,
         metadata: { action: proposal.action, risk: proposal.risk, reason: message.slice(0, 300) },
-      });
+      }).catch((auditErr: unknown) =>
+        log.error({ err: (auditErr as Error).message, proposalId: proposal.id }, "could not record a blocked apply"),
+      );
     }
   }
 

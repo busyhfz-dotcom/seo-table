@@ -43,6 +43,7 @@ export type AuditAction =
   | "member.role_change"
   | "apikey.create"
   | "apikey.revoke"
+  | "auth.org_switch"
   | "report.create";
 
 export async function record(input: {

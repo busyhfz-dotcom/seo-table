@@ -10,7 +10,7 @@
  * Tokens are cached in memory until shortly before expiry. Nothing is written to
  * disk and nothing is logged.
  */
-import { createSign } from "node:crypto";
+import { createHash, createSign } from "node:crypto";
 import { ConnectorError, httpJson } from "./types.js";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -39,9 +39,20 @@ function b64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
 
-function cacheKey(creds: GoogleCredentials, scopes: string[]): string {
-  const id = creds.type === "service_account" ? creds.client_email : creds.client_id;
-  return `${creds.type}:${id}:${scopes.join(" ")}`;
+/**
+ * The whole credential is part of the key: two projects sharing an OAuth client
+ * (or a service account impersonating different subjects) hold different grants,
+ * and one must never be handed a token minted for the other. Hashed so no secret
+ * sits in the map's keys.
+ */
+export function cacheKey(creds: GoogleCredentials, scopes: string[]): string {
+  const material =
+    creds.type === "service_account"
+      ? [creds.type, creds.client_email, creds.private_key, creds.subject ?? ""]
+      : [creds.type, creds.client_id, creds.client_secret, creds.refresh_token];
+  return createHash("sha256")
+    .update(JSON.stringify([...material, [...scopes].sort().join(" ")]))
+    .digest("hex");
 }
 
 export async function accessToken(creds: GoogleCredentials, scopes: string[]): Promise<string> {

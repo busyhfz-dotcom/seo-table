@@ -81,9 +81,15 @@ function shell(
         capabilities: await capabilities(),
       };
     }
-    const res = await httpJson<{ id?: string; error?: unknown }>(spec.profileUrl(creds.accountId), {
-      headers: { authorization: `Bearer ${creds.tokens.accessToken}` },
-    });
+    let res;
+    try {
+      res = await httpJson<{ id?: string; error?: unknown }>(spec.profileUrl(creds.accountId), {
+        headers: { authorization: `Bearer ${creds.tokens.accessToken}` },
+      });
+    } catch (err) {
+      if (err instanceof ConnectorError) return { ok: false, reason: err.code, message: err.message };
+      return { ok: false, reason: "network_error", message: (err as Error).message };
+    }
     if (res.status === 401) {
       return { ok: false, reason: "token_expired", message: "The access token has expired; re-authorize the account." };
     }

@@ -14,7 +14,7 @@ import type { Connector } from "./types.js";
 
 export * from "./types.js";
 export { wordpress, type WordPressCredentials } from "./wordpress.js";
-export { searchConsole, type SearchConsoleCredentials, type Opportunity, type QueryRow } from "./search-console.js";
+export { searchConsole, type SearchConsoleCredentials, type Opportunity, type QueryRow, type SuggestedActionCode } from "./search-console.js";
 export { ga4, type Ga4Credentials, type PageMetrics } from "./ga4.js";
 export { instagram, youtube, type SocialCredentials, type OAuthTokens, type OAuthAppConfig } from "./social.js";
 export { accessToken, forgetTokens, SCOPES, type GoogleCredentials } from "./google-auth.js";
