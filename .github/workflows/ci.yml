@@ -60,7 +60,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm -r typecheck
+        run: pnpm typecheck
 
       - name: Lint
         run: pnpm --filter @seo/web lint
@@ -78,17 +78,24 @@ jobs:
         run: NODE_ENV=production pnpm --filter @seo/web build
 
       - name: Smoke — start fixture site, worker and web
+        env:
+          # The fixture site is on 127.0.0.1, which the crawler's SSRF guard refuses otherwise.
+          ALLOW_PRIVATE_NETWORK: "1"
         run: |
           SEED_EMAIL=ci@example.com SEED_PASSWORD=ci-smoke-password pnpm exec tsx scripts/seed.ts
           nohup pnpm exec tsx scripts/fixture-server.ts > fixture.log 2>&1 &
           SERVICE_ROLE=worker PORT=3001 nohup sh scripts/start.sh > worker.log 2>&1 &
           NODE_ENV=production SERVICE_ROLE=web PORT=3000 nohup sh scripts/start.sh > web.log 2>&1 &
           for i in $(seq 1 60); do
-            curl -sf localhost:3000/api/ready && curl -sf localhost:3001/ready && break
+            curl -sf localhost:3000/api/ready && curl -sf localhost:3001/ready && exit 0
             sleep 2
           done
+          echo "web or worker did not become ready" >&2
+          exit 1
 
       - name: Smoke — run
+        env:
+          ALLOW_PRIVATE_NETWORK: "1"
         run: SMOKE_EMAIL=ci@example.com SMOKE_PASSWORD=ci-smoke-password SMOKE_SITE=http://127.0.0.1:4555 pnpm smoke
 
       - name: Service logs

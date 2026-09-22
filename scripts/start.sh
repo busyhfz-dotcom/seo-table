@@ -12,10 +12,15 @@ case "${SERVICE_ROLE:-web}" in
       (cd packages/db && node --import tsx src/migrate.ts)
     fi
     # First-owner bootstrap: creates the initial account from OWNER_EMAIL /
-    # OWNER_PASSWORD only while the database has no users at all.
+    # OWNER_PASSWORD only while the database has no users at all. A failure does
+    # not stop the app (it may be serving existing users), but it must be seen:
+    # nobody can sign in to a fresh deployment until it succeeds.
     if [ -n "${OWNER_EMAIL:-}" ] && [ -n "${OWNER_PASSWORD:-}" ]; then
-      SEED_ONLY_IF_EMPTY=1 SEED_EMAIL="$OWNER_EMAIL" SEED_PASSWORD="$OWNER_PASSWORD" \
-        SEED_SITE="${SEED_SITE:-}" node --import tsx scripts/seed.ts || echo "[start] owner bootstrap failed" >&2
+      if ! SEED_ONLY_IF_EMPTY=1 SEED_EMAIL="$OWNER_EMAIL" SEED_PASSWORD="$OWNER_PASSWORD" \
+        SEED_SITE="${SEED_SITE:-}" node --import tsx scripts/seed.ts; then
+        echo "[start] ERROR: owner bootstrap failed (see the [seed] line above); no owner account was created." >&2
+        echo "[start] ERROR: fix the cause and restart the service; the bootstrap runs again on every start." >&2
+      fi
     fi
     cd apps/web
     exec node ../../node_modules/next/dist/bin/next start -p "${PORT:-3000}" -H 0.0.0.0

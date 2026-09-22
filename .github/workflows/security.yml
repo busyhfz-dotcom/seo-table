@@ -38,12 +38,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Advanced setup: GitHub's "default setup" for code scanning must be OFF
+  # (Settings > Code security > CodeQL analysis), otherwise the upload is refused
+  # and the check fails within seconds. See docs/DEPLOY.md, "CI".
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
     permissions:
-      security-events: write
+      actions: read
       contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3

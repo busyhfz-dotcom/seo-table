@@ -44,6 +44,9 @@ async function call(
     redirect: "manual",
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      // What a browser sends on a same-origin write; the API refuses cookie-
+      // authenticated writes whose Origin is another site.
+      ...(method !== "GET" && method !== "HEAD" ? { origin: BASE } : {}),
       ...(cookie ? { cookie } : {}),
       ...headers,
     },
@@ -98,6 +101,9 @@ async function main(): Promise<void> {
   check(login.status === 200 && Boolean(cookie), "login sets a session cookie", login.data);
   if (!cookie) throw new Error("cannot continue without a session");
 
+  const crossSite = await call("POST", "/api/projects", { name: "x", baseUrl: SITE }, { origin: "https://evil.example" });
+  check(crossSite.status === 403, "a cross-site write with the session cookie is refused (403)", crossSite.status);
+
   console.log("project");
   const created = await call("POST", "/api/projects", {
     name: `Smoke ${new Date().toISOString()}`,
@@ -120,6 +126,9 @@ async function main(): Promise<void> {
   const overlap = await call("POST", `/api/projects/${projectId}/scans`, {}, { "idempotency-key": `${key}-2` });
   check(overlap.status === 409, "a second concurrent scan is refused (409)", overlap.data);
 
+  // Only these are final: a failed attempt that will be retried puts the run
+  // back to QUEUED, so FAILED/DEAD_LETTER mean the worker has given up.
+  const FINAL = ["SUCCEEDED", "FAILED", "DEAD_LETTER", "CANCELED"];
   const started = Date.now();
   let status = "";
   let run: any = null;
@@ -127,10 +136,17 @@ async function main(): Promise<void> {
     const res = await call("GET", `/api/scans/${runId}?pages=0`);
     run = res.data?.run;
     status = run?.status;
-    if (["SUCCEEDED", "FAILED", "DEAD_LETTER", "CANCELED"].includes(status)) break;
+    if (FINAL.includes(status)) break;
     await new Promise((r) => setTimeout(r, 1500));
   }
-  check(status === "SUCCEEDED", `worker finished the run (${status}, ${Math.round((Date.now() - started) / 1000)}s)`, run);
+  const elapsed = Math.round((Date.now() - started) / 1000);
+  check(
+    status === "SUCCEEDED",
+    FINAL.includes(status)
+      ? `worker finished the run (${status}, ${elapsed}s)`
+      : `worker finished the run (still ${status} after ${elapsed}s; is the worker running?)`,
+    run,
+  );
   check(typeof run?.score === "number", `run has a score (${run?.score})`, run);
   check((run?.pagesCrawled ?? 0) > 0, `pages crawled (${run?.pagesCrawled})`, run);
 

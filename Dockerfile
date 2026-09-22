@@ -32,7 +32,10 @@ RUN DATABASE_URL=postgresql://build:build@localhost:5432/build \
     ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000001 \
     SESSION_SECRET=build-time-placeholder-not-used-at-runtime-000 \
     NODE_ENV=production \
-    pnpm --filter @seo/web build
+    pnpm --filter @seo/web build \
+ && rm -rf apps/web/.next/cache
+# Dev dependencies stay installed: the worker, migrations and the seed script
+# run TypeScript through tsx at runtime.
 
 # ---- runtime --------------------------------------------------------------
 FROM base AS runtime

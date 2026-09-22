@@ -4,7 +4,9 @@ dist
 out
 *.tsbuildinfo
 .env
-.env.local
+.env.*
+!.env.example
+*.log
 coverage
 .DS_Store
 

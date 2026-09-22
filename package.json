@@ -8,16 +8,17 @@
   },
   "scripts": {
     "build": "pnpm --filter @seo/db build && pnpm --filter @seo/core build && pnpm --filter @seo/connectors build && pnpm --filter @seo/pipeline build && pnpm --filter @seo/worker build && pnpm --filter @seo/web build",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit -p tests",
     "lint": "pnpm -r lint",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "pnpm --filter @seo/db migrate",
     "db:deploy": "pnpm --filter @seo/db deploy",
-    "db:seed": "pnpm --filter @seo/db seed",
+    "db:seed": "tsx scripts/seed.ts",
     "dev:web": "pnpm --filter @seo/web dev",
     "dev:worker": "pnpm --filter @seo/worker dev",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "fixture": "tsx scripts/fixture-server.ts"
   },
   "devDependencies": {
     "@seo/connectors": "workspace:*",

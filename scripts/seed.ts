@@ -10,9 +10,11 @@
  *   SEED_EMAIL=you@example.com SEED_PASSWORD='…' SEED_SITE=https://example.ir pnpm tsx scripts/seed.ts
  */
 import {
+  and,
   connectors,
   db,
   eq,
+  isNull,
   memberships,
   organizations,
   projects,
@@ -49,26 +51,46 @@ async function main(): Promise<void> {
     return;
   }
 
-  const org = (
-    await db
-      .insert(organizations)
-      .values({ name: orgName, slug: slugify(orgName) })
-      .returning()
-  )[0]!;
+  // One transaction: a failure part-way (a second replica bootstrapping at the
+  // same moment, say) leaves nothing behind for the next start to trip over.
+  const { org, user, projectId } = await db.transaction(async (tx) => {
+    const slug = slugify(orgName);
+    // An organization with this slug and no members is debris from a bootstrap
+    // that failed before this was transactional: adopt it rather than failing
+    // on the unique slug at every start.
+    const orphan = (
+      await tx
+        .select({ id: organizations.id, name: organizations.name })
+        .from(organizations)
+        .leftJoin(memberships, eq(memberships.orgId, organizations.id))
+        .where(and(eq(organizations.slug, slug), isNull(memberships.id)))
+        .limit(1)
+    )[0];
+    const taken = orphan
+      ? false
+      : (await tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, slug)).limit(1))
+          .length > 0;
+    const org =
+      orphan ??
+      (
+        await tx
+          .insert(organizations)
+          .values({ name: orgName, slug: taken ? `${slug}-${Date.now().toString(36)}` : slug })
+          .returning({ id: organizations.id, name: organizations.name })
+      )[0]!;
 
-  const user = (
-    await db
-      .insert(users)
-      .values({ email, name: process.env.SEED_NAME ?? null, passwordHash: await hashPassword(password) })
-      .returning()
-  )[0]!;
+    const user = (
+      await tx
+        .insert(users)
+        .values({ email, name: process.env.SEED_NAME ?? null, passwordHash: await hashPassword(password) })
+        .returning()
+    )[0]!;
 
-  await db.insert(memberships).values({ userId: user.id, orgId: org.id, role: "OWNER" });
+    await tx.insert(memberships).values({ userId: user.id, orgId: org.id, role: "OWNER" });
 
-  let projectId: string | null = null;
-  if (site) {
+    if (!site) return { org, user, projectId: null };
     const project = (
-      await db
+      await tx
         .insert(projects)
         .values({
           orgId: org.id,
@@ -80,16 +102,16 @@ async function main(): Promise<void> {
         })
         .returning()
     )[0]!;
-    projectId = project.id;
 
-    await db.insert(connectors).values(
+    await tx.insert(connectors).values(
       (["WORDPRESS", "SEARCH_CONSOLE", "GA4", "INSTAGRAM", "YOUTUBE"] as const).map((kind) => ({
         projectId: project.id,
         kind,
         status: "NOT_CONNECTED" as const,
       })),
     );
-  }
+    return { org, user, projectId: project.id };
+  });
 
   await recordAudit({
     orgId: org.id,
@@ -125,7 +147,10 @@ main()
   .then(() => closeDb())
   .then(() => process.exit(0))
   .catch(async (err) => {
-    console.error("[seed] failed:", err instanceof Error ? err.message : err);
+    // A failed query's message lists its parameters (the password hash among
+    // them); the driver's own error, kept as `cause`, says what went wrong.
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause : err;
+    console.error("[seed] failed:", cause instanceof Error ? cause.message : cause);
     await closeDb().catch(() => {});
     process.exit(1);
   });

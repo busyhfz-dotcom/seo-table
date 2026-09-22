@@ -38,9 +38,12 @@ POST /api/projects/:id/scans  (Idempotency-Key)
 GET /api/scans/:id  → status, progress, score, pages
 ```
 
-Retries use exponential backoff (3 attempts); a run that exhausts them is marked
-`DEAD_LETTER` with its error. A worker that crashes mid-run leaves nothing
-stuck: runs older than an hour are released on the next worker start.
+Retries use exponential backoff (3 attempts). Between attempts the run goes back
+to `QUEUED` (keeping the project's one-active-run slot) with the error shown; a
+run that exhausts them, or hits a failure no retry can fix (a target address the
+SSRF guard refuses), is marked `DEAD_LETTER`. A worker that dies mid-run leaves
+nothing stuck: a running scan writes a heartbeat, and every five minutes the
+worker releases runs with no heartbeat for 15 minutes *and* no live queue job.
 
 ## The rules the code is not allowed to break
 
@@ -71,8 +74,8 @@ edited after the scan. Rollback restores the recorded values.
 Requirements: Node 22, pnpm 10, PostgreSQL 16, Redis 7.
 
 ```bash
-cp .env.example .env            # then set ENCRYPTION_KEY and SESSION_SECRET:
-                                #   openssl rand -hex 32
+cp .env.example .env            # then set ENCRYPTION_KEY and SESSION_SECRET, e.g.
+                                #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 pnpm install
 pnpm db:migrate
 SEED_EMAIL=you@example.com SEED_PASSWORD='at-least-10-chars' pnpm exec tsx scripts/seed.ts
@@ -81,10 +84,14 @@ pnpm dev:worker                 # terminal 1
 pnpm dev:web                    # terminal 2 → http://localhost:3000
 ```
 
+The crawler refuses private and loopback addresses (SSRF guard). To scan a site
+on your own machine or network, start **both** web and worker with
+`ALLOW_PRIVATE_NETWORK=1`. Never set it in production.
+
 ## Tests
 
 ```bash
-pnpm test                       # 73 tests: unit, pipeline end-to-end, agent + WordPress
+pnpm test                       # unit, pipeline end-to-end, agent + WordPress
 pnpm -r typecheck
 pnpm --filter @seo/web lint
 ```
@@ -93,20 +100,27 @@ The end-to-end tests crawl a real HTTP fixture site (`tests/fixture-site.ts`)
 with deliberate defects and a WordPress REST double (`tests/fake-wordpress.ts`),
 against real PostgreSQL and Redis.
 
+Tests need PostgreSQL and Redis from `.env`; vitest sets `ALLOW_PRIVATE_NETWORK=1`
+itself. Set `TEST_QUEUE_PREFIX` when a worker is running against the same Redis.
+
 Smoke test against any running deployment:
 
 ```bash
 BASE_URL=https://your-app SMOKE_EMAIL=… SMOKE_PASSWORD=… SMOKE_SITE=https://a-site-you-own pnpm smoke
 ```
 
+Locally, `pnpm fixture` serves the test site on `http://127.0.0.1:4555` (the
+default `SMOKE_SITE`); web and worker must then run with `ALLOW_PRIVATE_NETWORK=1`.
+
 ## Connectors
 
 - **WordPress** — REST API with an Application Password. Title and image alt text
   work on any WordPress. SEO title, meta description, canonical, robots and
-  redirects need the bridge plugin in
+  redirects need the bridge plugin **0.5.0 or later** in
   `packages/connectors/wordpress-plugin/seo-table-bridge.php` (install as a
-  must-use plugin); without it those fixes fail with an explicit
-  "unsupported field" rather than pretending to succeed.
+  must-use plugin); without it, or with an older version, those fixes fail with
+  an explicit "unsupported field" rather than pretending to succeed, and the
+  connection check says which version it found.
 - **Search Console / GA4** — service-account key or OAuth refresh token. Content
   Opportunities is built only from Search Console data; with no connector it is
   empty.
