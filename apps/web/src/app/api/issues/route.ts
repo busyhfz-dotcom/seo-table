@@ -13,6 +13,8 @@ export const GET = handler({ permission: "issue:read" }, async ({ req, session }
   const { limit, offset, page, perPage } = pagination(req);
   const sev = req.nextUrl.searchParams.get("severity");
   const status = req.nextUrl.searchParams.get("status");
+  const category = req.nextUrl.searchParams.get("category")?.slice(0, 100);
+  const q = req.nextUrl.searchParams.get("q")?.slice(0, 200);
 
   const { rows, total } = await listIssues(project.id, {
     ...(sev && ["CRITICAL", "SERIOUS", "WARNING", "INFO"].includes(sev)
@@ -21,10 +23,8 @@ export const GET = handler({ permission: "issue:read" }, async ({ req, session }
     ...(status && ["OPEN", "FIXED", "IGNORED"].includes(status)
       ? { status: status as "OPEN" | "FIXED" | "IGNORED" }
       : {}),
-    ...(req.nextUrl.searchParams.get("category")
-      ? { category: req.nextUrl.searchParams.get("category")! }
-      : {}),
-    ...(req.nextUrl.searchParams.get("q") ? { q: req.nextUrl.searchParams.get("q")! } : {}),
+    ...(category ? { category } : {}),
+    ...(q ? { q } : {}),
     limit,
     offset,
   });

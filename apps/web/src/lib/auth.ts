@@ -11,10 +11,13 @@ import { cookies, headers } from "next/headers";
 import {
   and,
   apiKeys,
+  asc,
   db,
   eq,
   gte,
+  isNull,
   memberships,
+  or,
   organizations,
   sessions,
   users,
@@ -24,13 +27,18 @@ import {
   assertCan,
   authLimit,
   can,
+  commandReady,
   hashToken,
+  logger,
   newToken,
+  RateLimited,
   recordAudit,
   Unauthorized,
   verifyPassword,
+  type Actor,
   type Permission,
 } from "@seo/core";
+import { clientIp } from "./request";
 
 const COOKIE = "seo_session";
 const SESSION_DAYS = 14;
@@ -42,8 +50,22 @@ export type Session = {
   orgId: string;
   orgName: string;
   role: Role;
+  /** How the caller authenticated: a browser session cookie or an API key. */
+  via: "session" | "api_key";
 };
 
+/** The audit actor for a request — the one place that tells a key from a person. */
+export function actorFor(session: Pick<Session, "userId" | "via">, ip: string | null): Actor {
+  return { type: session.via === "api_key" ? "API_KEY" : "USER", id: session.userId, ip };
+}
+
+/**
+ * The session's organization is the one stored on the session row. Sessions
+ * from before migration 0004 have none; they act in the user's earliest
+ * membership, ordered by (created_at, id) so the choice never changes between
+ * requests. A session whose stored org the user has since left resolves to
+ * nothing — it is not silently moved into another organization.
+ */
 export async function currentSession(): Promise<Session | null> {
   const token = (await cookies()).get(COOKIE)?.value;
   if (!token) return null;
@@ -59,12 +81,20 @@ export async function currentSession(): Promise<Session | null> {
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
-    .innerJoin(memberships, eq(memberships.userId, users.id))
+    .innerJoin(
+      memberships,
+      and(
+        eq(memberships.userId, sessions.userId),
+        or(isNull(sessions.orgId), eq(memberships.orgId, sessions.orgId)),
+      ),
+    )
     .innerJoin(organizations, eq(organizations.id, memberships.orgId))
     .where(and(eq(sessions.tokenHash, hashToken(token)), gte(sessions.expiresAt, new Date())))
+    .orderBy(asc(memberships.createdAt), asc(memberships.id))
     .limit(1);
 
-  return rows[0] ?? null;
+  const row = rows[0];
+  return row ? { ...row, via: "session" } : null;
 }
 
 export async function requireSession(): Promise<Session> {
@@ -85,41 +115,128 @@ export async function sessionCan(permission: Permission): Promise<boolean> {
   return session ? can(session.role, permission) : false;
 }
 
+/** Every organization the user belongs to, in the same order the fallback uses. */
+export async function userOrgs(userId: string) {
+  return db
+    .select({ orgId: memberships.orgId, name: organizations.name, role: memberships.role })
+    .from(memberships)
+    .innerJoin(organizations, eq(organizations.id, memberships.orgId))
+    .where(eq(memberships.userId, userId))
+    .orderBy(asc(memberships.createdAt), asc(memberships.id));
+}
+
+/** Point the current browser session at another organization the user belongs to. */
+export async function switchOrg(orgId: string): Promise<boolean> {
+  const token = (await cookies()).get(COOKIE)?.value;
+  const session = await currentSession();
+  if (!token || !session) throw new Unauthorized();
+  const member = (await userOrgs(session.userId)).some((m) => m.orgId === orgId);
+  if (!member) return false;
+  await db.update(sessions).set({ orgId }).where(eq(sessions.tokenHash, hashToken(token)));
+  return true;
+}
+
+// ---------------------------------------------------------------- login
+
+/**
+ * Failed logins per account, on top of the per-IP limit: an attacker rotating
+ * addresses still gets only this many guesses at one password. Keyed by a hash
+ * of the normalized email whether or not the account exists, so the limit itself
+ * says nothing about which emails are registered. Only failures count, and a
+ * successful login clears the slate.
+ */
+const ACCOUNT_MAX_FAILURES = 10;
+const ACCOUNT_WINDOW_MS = 15 * 60_000;
+
+function accountKey(email: string): string {
+  return `loginfail:${hashToken(email)}`;
+}
+
+/** Throws RateLimited when the account is locked; fails closed if Redis is unavailable. */
+async function assertAccountNotLocked(email: string): Promise<void> {
+  let wait = 0;
+  try {
+    const client = await commandReady();
+    const key = accountKey(email);
+    const now = Date.now();
+    await client.zremrangebyscore(key, "-inf", now - ACCOUNT_WINDOW_MS);
+    if ((await client.zcard(key)) >= ACCOUNT_MAX_FAILURES) {
+      const oldest = Number((await client.zrange(key, 0, 0, "WITHSCORES"))[1] ?? now);
+      wait = Math.max(1, Math.ceil((oldest + ACCOUNT_WINDOW_MS - now) / 1000));
+    }
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, "login account limiter unavailable");
+    throw new RateLimited(30);
+  }
+  if (wait > 0) throw new RateLimited(wait);
+}
+
+async function recordAccountFailure(email: string): Promise<void> {
+  try {
+    const client = await commandReady();
+    const key = accountKey(email);
+    await client.zadd(key, Date.now(), `${Date.now()}-${newToken(6)}`);
+    await client.pexpire(key, ACCOUNT_WINDOW_MS);
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, "could not record a failed login");
+  }
+}
+
+async function clearAccountFailures(email: string): Promise<void> {
+  await commandReady()
+    .then((client) => client.del(accountKey(email)))
+    .catch(() => undefined);
+}
+
 export async function login(
-  email: string,
+  rawEmail: string,
   password: string,
 ): Promise<{ ok: true; session: Session } | { ok: false }> {
   const hdrs = await headers();
-  const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = clientIp(hdrs);
+  const email = rawEmail.trim().toLowerCase();
   await authLimit(ip);
+  await assertAccountNotLocked(email);
 
-  const rows = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-  const user = rows[0];
+  const user = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
 
   // Verify against a dummy hash when the user does not exist, so a missing
   // account and a wrong password take the same time.
   const stored = user?.passwordHash ?? "scrypt$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAA";
   const valid = await verifyPassword(password, stored);
-  if (!user || !valid) {
-    const membership = user
-      ? (await db.select().from(memberships).where(eq(memberships.userId, user.id)).limit(1))[0]
-      : undefined;
-    if (membership) {
+  const membership = user
+    ? (
+        await db
+          .select()
+          .from(memberships)
+          .where(eq(memberships.userId, user.id))
+          .orderBy(asc(memberships.createdAt), asc(memberships.id))
+          .limit(1)
+      )[0]
+    : undefined;
+
+  // A user with no organization gets the same answer as a wrong password:
+  // anything else would confirm that the password was right.
+  if (!user || !valid || !membership) {
+    await recordAccountFailure(email);
+    if (user && membership) {
       await recordAudit({
         orgId: membership.orgId,
-        actor: { type: "USER", id: user!.id, ip },
+        actor: { type: "USER", id: user.id, ip },
         action: "auth.login_failed",
         metadata: { email },
       });
     }
     return { ok: false };
   }
+  await clearAccountFailures(email);
 
   const token = newToken(32);
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await db.insert(sessions).values({
     tokenHash: hashToken(token),
     userId: user.id,
+    orgId: membership.orgId,
     expiresAt,
     userAgent: hdrs.get("user-agent") ?? null,
     ip,
@@ -153,7 +270,7 @@ export async function logout(): Promise<void> {
     if (session) {
       await recordAudit({
         orgId: session.orgId,
-        actor: { type: "USER", id: session.userId },
+        actor: { type: "USER", id: session.userId, ip: clientIp(await headers()) },
         action: "auth.logout",
       });
     }
@@ -194,6 +311,7 @@ export async function authenticateApiKey(header: string | null): Promise<Session
     // An API key acts as an EDITOR: it can scan and apply low-risk fixes, but it
     // can never approve a sensitive change. Approval stays a human act.
     role: "EDITOR",
+    via: "api_key",
   };
 }
 

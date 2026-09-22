@@ -1,5 +1,4 @@
-import { NotFound } from "@seo/core";
-import { enqueueFix } from "@seo/core";
+import { NotFound, enqueueFix } from "@seo/core";
 import { handler } from "../../../../../lib/route";
 import { getFixForOrg } from "../../../../../lib/queries";
 

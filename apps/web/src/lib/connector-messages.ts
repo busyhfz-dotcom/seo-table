@@ -45,6 +45,34 @@ const REASONS: Record<string, Record<Locale, string>> = {
     fa: "اتصال به سایت برقرار نشد. آدرس سایت را بررسی کنید و مطمئن شوید سایت از اینترنت در دسترس است.",
     en: "Could not reach the site. Check the address and that the site is reachable from the internet.",
   },
+  blocked_address: {
+    fa: "این آدرس به یک شبکه‌ی داخلی یا خصوصی اشاره می‌کند و اتصال به آن مجاز نیست. آدرس عمومی سایت را وارد کنید.",
+    en: "That address points to an internal or private network, which this service does not connect to. Enter the site's public address.",
+  },
+  redirected: {
+    fa: "سایت به آدرس دیگری ریدایرکت می‌کند. آدرس نهایی سایت (همان که در مرورگر باز می‌شود، مثلاً با https یا www) را وارد کنید.",
+    en: "The site redirects to another address. Enter the final address (the one your browser ends up on, e.g. with https or www).",
+  },
+  response_too_large: {
+    fa: "پاسخ سایت بیش از حد بزرگ بود و خوانده نشد.",
+    en: "The site's response was too large to read.",
+  },
+  no_site_access: {
+    fa: "این حساب گوگل به این property در Search Console دسترسی ندارد. ایمیل حساب سرویس را در Search Console به‌عنوان کاربر اضافه کنید.",
+    en: "This Google account has no access to the Search Console property. Add the service account's email as a user in Search Console.",
+  },
+  site_not_found: {
+    fa: "این property در حساب Search Console پیدا نشد. آدرس را دقیقاً مانند Search Console وارد کنید (مثلاً sc-domain:example.com).",
+    en: "That property is not in this Search Console account. Enter it exactly as Search Console shows it (e.g. sc-domain:example.com).",
+  },
+  no_property_access: {
+    fa: "این حساب گوگل به این property در GA4 دسترسی ندارد. ایمیل حساب سرویس را با نقش Viewer به property اضافه کنید.",
+    en: "This Google account has no access to the GA4 property. Add the service account's email to the property with the Viewer role.",
+  },
+  property_not_found: {
+    fa: "property با این شناسه در GA4 وجود ندارد. شناسه‌ی عددی property را بررسی کنید.",
+    en: "No GA4 property has that id. Check the numeric property id.",
+  },
   unexpected_response: {
     fa: "وردپرس پاسخ غیرمنتظره‌ای داد.",
     en: "WordPress returned an unexpected response.",
@@ -92,10 +120,23 @@ export function connectorMessage(
     if (who) return locale === "fa" ? `متصل شد با حساب ${who}.` : `Connected as ${who}.`;
     return message;
   }
+  // A network failure's message is the raw socket error (resolver output,
+  // internal addresses): it is logged, never shown or stored.
+  if (result.reason === "network_error") return REASONS.network_error![locale];
   const text = result.reason ? REASONS[result.reason]?.[locale] : undefined;
   if (!text) return message;
+  if (result.reason === "redirected") {
+    const location = message.match(/redirecting to (\S+?);/)?.[1];
+    return location ? `${text} (${location})` : text;
+  }
   const detail = message.match(/\((?:HTTP )?\d{3}[^)]*\)/)?.[0];
   return detail ? `${text} ${detail}` : text;
+}
+
+/** What goes in `connectors.last_error`: the reason code and an English sentence safe to show later. */
+export function storedConnectorError(result: { reason?: string; message?: string }): string {
+  const reason = result.reason ?? "unknown";
+  return `${reason}: ${connectorMessage("en", { ok: false, reason, message: result.message ?? "" }) || "Connection failed"}`;
 }
 
 export function connectorNotes(locale: Locale, notes: string[] | undefined): string[] {

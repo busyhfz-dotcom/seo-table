@@ -4,6 +4,7 @@ import { login, currentSession } from "../../lib/auth";
 import { DEFAULT_LOCALE, dirOf, isLocale, translator } from "../../lib/i18n";
 import { Note } from "../../components/ui";
 import { safePath } from "../../lib/redirect";
+import { isAppError } from "@seo/core";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,16 @@ export default async function LoginPage({
     const email = String(formData.get("email") ?? "");
     const password = String(formData.get("password") ?? "");
     const next = safePath(String(formData.get("next") ?? "/"));
-    const result = await login(email, password);
-    if (!result.ok) {
-      redirect(`/login?error=1${next !== "/" ? `&next=${encodeURIComponent(next)}` : ""}`);
+    const back = (error: string) =>
+      `/login?error=${error}${next !== "/" ? `&next=${encodeURIComponent(next)}` : ""}`;
+    let ok: boolean;
+    try {
+      ok = (await login(email, password)).ok;
+    } catch (err) {
+      if (isAppError(err) && err.status === 429) redirect(back("rate"));
+      throw err;
     }
-    redirect(next);
+    redirect(ok ? next : back("1"));
   }
 
   return (
@@ -56,10 +62,12 @@ export default async function LoginPage({
             </div>
           </div>
 
-          {params.error && <Note tone="crit" icon="alert">{t("login_failed")}</Note>}
+          {params.error && (
+            <Note tone="crit" icon="alert">{t(params.error === "rate" ? "err_rate" : "login_failed")}</Note>
+          )}
 
           <form action={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <input type="hidden" name="next" value={params.next ?? "/"} />
+            <input type="hidden" name="next" value={safePath(params.next)} />
             <label className="field">
               <span>{t("email")}</span>
               <input id="email" name="email" type="email" autoComplete="username" required dir="ltr" />

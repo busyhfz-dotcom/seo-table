@@ -10,7 +10,7 @@ import { getFixForOrg } from "../../../../../lib/queries";
  * Rollback needs no fresh approval: restoring the values recorded before a write
  * is always allowed, and refusing it would be the more dangerous default.
  */
-export const POST = handler({ permission: "fix:rollback" }, async ({ session, params, ip }) => {
+export const POST = handler({ permission: "fix:rollback" }, async ({ session, params, actor }) => {
   const found = await getFixForOrg(session.orgId, params.id!);
   if (!found) throw new NotFound("Fix not found");
 
@@ -26,7 +26,7 @@ export const POST = handler({ permission: "fix:rollback" }, async ({ session, pa
 
   const outcome = await rollback({
     executionId: execution.id,
-    actor: { type: "USER", id: session.userId, ip },
+    actor,
   });
   return outcome;
 });

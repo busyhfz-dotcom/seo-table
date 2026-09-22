@@ -1,17 +1,37 @@
-import { connectorMessage, connectorNotes } from "../../../../lib/connector-messages";
+import { connectorMessage, connectorNotes, storedConnectorError } from "../../../../lib/connector-messages";
 import { DEFAULT_LOCALE, isLocale } from "../../../../lib/i18n";
 import { z } from "zod";
 import { and, connectors, db, eq, type ConnectorKind } from "@seo/db";
-import { NotFound, BadRequest, recordAudit, seal } from "@seo/core";
-import { build, AWAITING_OAUTH_APP } from "@seo/connectors";
+import { NotFound, BadRequest, assertPublicUrl, recordAudit, seal } from "@seo/core";
+import { build, AWAITING_OAUTH_APP, CONNECTOR_KINDS } from "@seo/connectors";
 import { handler } from "../../../../lib/route";
 import { defaultProject, getProject } from "../../../../lib/queries";
 
-const KINDS = ["WORDPRESS", "SEARCH_CONSOLE", "GA4", "INSTAGRAM", "YOUTUBE"] as const;
+/** The connector kind from the URL, or a 400 — never a database enum error. */
+function kindParam(raw: string | undefined): ConnectorKind {
+  const kind = (raw ?? "").toUpperCase();
+  if (!CONNECTOR_KINDS.includes(kind as ConnectorKind)) throw new BadRequest("Unknown connector", { kind: raw });
+  return kind as ConnectorKind;
+}
+
+/**
+ * Credentials are sent to the WordPress site, so outside development it must be
+ * https. Plain http is allowed where private targets are (tests, local dev).
+ */
+function plainHttpAllowed(): boolean {
+  return process.env.ALLOW_PRIVATE_NETWORK === "1" || process.env.NODE_ENV !== "production";
+}
 
 const wordpress = z.object({
   kind: z.literal("WORDPRESS"),
-  siteUrl: z.string().url(),
+  siteUrl: z
+    .string()
+    .trim()
+    .max(2000)
+    .url()
+    .refine((u) => /^https:\/\//i.test(u) || (plainHttpAllowed() && /^http:\/\//i.test(u)), {
+      message: "must be an https URL",
+    }),
   username: z.string().min(1),
   applicationPassword: z.string().min(8),
 });
@@ -52,10 +72,8 @@ const schema = z.discriminatedUnion("kind", [wordpress, searchConsole, ga4]);
  * are sealed with AES-256-GCM on the way in. No response from this route, ever,
  * contains credential material.
  */
-export const POST = handler({ permission: "connector:write", schema }, async ({ req, session, body, ip }) => {
-  const kindParam = decodeURIComponent((await Promise.resolve(req.nextUrl.pathname)).split("/").pop() ?? "");
-  const kind = kindParam.toUpperCase() as ConnectorKind;
-  if (!KINDS.includes(kind as (typeof KINDS)[number])) throw new BadRequest(`Unknown connector: ${kindParam}`);
+export const POST = handler({ permission: "connector:write", schema }, async ({ req, session, params, body, actor }) => {
+  const kind = kindParam(params.kind);
   if (kind !== body.kind) throw new BadRequest("The connector in the URL and the body do not match");
   if (AWAITING_OAUTH_APP.includes(kind)) {
     throw new BadRequest(
@@ -72,6 +90,9 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
   // Verify first. A connector is never stored as CONNECTED on the strength of a
   // well-formed form submission.
   const { kind: _kind, ...credentials } = body;
+  // The site URL is the one thing here that makes the server connect somewhere
+  // the customer chose: refuse internal addresses before any request is made.
+  if (body.kind === "WORDPRESS") await assertPublicUrl(body.siteUrl);
   const client = build(kind, credentials as never);
   const result = await client.check();
 
@@ -89,7 +110,7 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
       secretTag: sealed?.tag ?? null,
       scopes,
       lastSyncAt: result.ok ? new Date() : null,
-      lastError: result.ok ? null : `${result.reason}: ${result.message}`,
+      lastError: result.ok ? null : storedConnectorError(result),
     })
     .onConflictDoUpdate({
       target: [connectors.projectId, connectors.kind],
@@ -100,14 +121,14 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
         secretTag: sealed?.tag ?? null,
         scopes,
         lastSyncAt: result.ok ? new Date() : null,
-        lastError: result.ok ? null : `${result.reason}: ${result.message}`,
+        lastError: result.ok ? null : storedConnectorError(result),
         updatedAt: new Date(),
       },
     });
 
   await recordAudit({
     orgId: session.orgId,
-    actor: { type: "USER", id: session.userId, ip },
+    actor,
     action: "connector.connect",
     targetType: "connector",
     targetId: `${project.id}:${kind}`,
@@ -129,8 +150,8 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
 });
 
 /** Disconnect: the sealed credential is removed, the row stays for its history. */
-export const DELETE = handler({ permission: "connector:write" }, async ({ req, session, ip }) => {
-  const kind = (req.nextUrl.pathname.split("/").pop() ?? "").toUpperCase() as ConnectorKind;
+export const DELETE = handler({ permission: "connector:write" }, async ({ req, session, params, actor }) => {
+  const kind = kindParam(params.kind);
   const requested = req.nextUrl.searchParams.get("projectId");
   const project = requested
     ? await getProject(session.orgId, requested)
@@ -151,7 +172,7 @@ export const DELETE = handler({ permission: "connector:write" }, async ({ req, s
 
   await recordAudit({
     orgId: session.orgId,
-    actor: { type: "USER", id: session.userId, ip },
+    actor,
     action: "connector.disconnect",
     targetType: "connector",
     targetId: `${project.id}:${kind}`,

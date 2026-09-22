@@ -18,6 +18,7 @@ import {
   eq,
   fixProposals,
   inArray,
+  isNotNull,
   issueOccurrences,
   organizations,
   pageSnapshots,
@@ -49,13 +50,14 @@ export async function listProjects(orgId: string): Promise<
     .groupBy(seoIssues.projectId);
   const countByProject = new Map(counts.map((c) => [c.projectId, c.n]));
 
-  const runs = await db
-    .select()
+  // Only each project's newest run, chosen in SQL: a project with thousands of
+  // runs must not load them all to show one.
+  const latest = await db
+    .selectDistinctOn([auditRuns.projectId])
     .from(auditRuns)
     .where(inArray(auditRuns.projectId, ids))
-    .orderBy(desc(auditRuns.queuedAt));
-  const lastByProject = new Map<string, AuditRun>();
-  for (const run of runs) if (!lastByProject.has(run.projectId)) lastByProject.set(run.projectId, run);
+    .orderBy(auditRuns.projectId, desc(auditRuns.queuedAt), desc(auditRuns.id));
+  const lastByProject = new Map(latest.map((run) => [run.projectId, run]));
 
   return rows.map((p) => ({
     ...p,
@@ -156,9 +158,13 @@ export async function dashboard(orgId: string, projectId?: string): Promise<Dash
   const trendRows = await db
     .select({ at: auditRuns.finishedAt, score: auditRuns.score })
     .from(auditRuns)
-    .where(and(eq(auditRuns.projectId, project.id), eq(auditRuns.status, "SUCCEEDED")))
-    .orderBy(auditRuns.finishedAt)
+    .where(
+      and(eq(auditRuns.projectId, project.id), eq(auditRuns.status, "SUCCEEDED"), isNotNull(auditRuns.finishedAt)),
+    )
+    .orderBy(desc(auditRuns.finishedAt))
     .limit(60);
+  // The newest 60, shown oldest-first.
+  trendRows.reverse();
 
   const activity = await db
     .select({
@@ -348,7 +354,7 @@ export async function listFixes(
   return rows.map((r) => ({ ...r.proposal, decision: r.decision ?? null }));
 }
 
-export async function listApprovalQueue(projectId: string) {
+export async function listApprovalQueue(projectId: string, limit = 200) {
   const rows = await db
     .select({ proposal: fixProposals, approval: approvals, issue: seoIssues })
     .from(fixProposals)
@@ -357,7 +363,8 @@ export async function listApprovalQueue(projectId: string) {
     .where(
       and(eq(fixProposals.projectId, projectId), eq(fixProposals.status, "AWAITING_APPROVAL")),
     )
-    .orderBy(desc(fixProposals.createdAt));
+    .orderBy(desc(fixProposals.createdAt))
+    .limit(limit);
   return rows;
 }
 
@@ -395,11 +402,35 @@ export async function listConnectors(projectId: string): Promise<Connector[]> {
 
 // ---------------------------------------------------------------- content
 
+const DAY_MS = 86_400_000;
+
+/**
+ * The Search Console window a sync stores: the 28 days ending two days ago
+ * (Search Console lags ~2 days), on UTC day boundaries. Every sync on the same
+ * day lands on the same period_start, so it refreshes the stored rows instead of
+ * adding a near-duplicate set per request.
+ */
+export function opportunityPeriod(now: Date): { start: Date; end: Date } {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const end = new Date(today - 2 * DAY_MS);
+  return { start: new Date(end.getTime() - 28 * DAY_MS), end };
+}
+
+/** Opportunities from the most recent synced period only; older periods are history. */
 export async function listOpportunities(projectId: string, limit = 50) {
+  const latestPeriod = db
+    .select({ at: sql`max(${contentOpportunities.periodStart})` })
+    .from(contentOpportunities)
+    .where(eq(contentOpportunities.projectId, projectId));
   return db
     .select()
     .from(contentOpportunities)
-    .where(eq(contentOpportunities.projectId, projectId))
+    .where(
+      and(
+        eq(contentOpportunities.projectId, projectId),
+        eq(contentOpportunities.periodStart, sql`(${latestPeriod})`),
+      ),
+    )
     .orderBy(desc(contentOpportunities.impressions))
     .limit(limit);
 }

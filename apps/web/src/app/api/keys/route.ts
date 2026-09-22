@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiKeys, db, eq } from "@seo/db";
+import { apiKeys, db, desc, eq } from "@seo/db";
 import { recordAudit } from "@seo/core";
 import { handler } from "../../../lib/route";
 import { newApiKey } from "../../../lib/auth";
 
-const schema = z.object({ name: z.string().min(1).max(60) });
+const schema = z.object({ name: z.string().trim().min(1).max(60) });
 
 export const GET = handler({ permission: "apikey:manage" }, async ({ session }) => {
-  const rows = await db.select().from(apiKeys).where(eq(apiKeys.orgId, session.orgId));
+  const rows = await db
+    .select()
+    .from(apiKeys)
+    .where(eq(apiKeys.orgId, session.orgId))
+    .orderBy(desc(apiKeys.createdAt))
+    .limit(100);
   // The secret is never readable again after creation; only its prefix is shown.
   return {
     keys: rows.map((k) => ({
@@ -22,7 +27,7 @@ export const GET = handler({ permission: "apikey:manage" }, async ({ session }) 
   };
 });
 
-export const POST = handler({ permission: "apikey:manage", schema }, async ({ session, body, ip }) => {
+export const POST = handler({ permission: "apikey:manage", schema }, async ({ session, body, actor }) => {
   const key = newApiKey();
   const row = (
     await db
@@ -33,7 +38,7 @@ export const POST = handler({ permission: "apikey:manage", schema }, async ({ se
 
   await recordAudit({
     orgId: session.orgId,
-    actor: { type: "USER", id: session.userId, ip },
+    actor,
     action: "apikey.create",
     targetType: "api_key",
     targetId: row.id,
