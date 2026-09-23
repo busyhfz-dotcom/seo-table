@@ -38,7 +38,18 @@ export type Extracted = {
   hreflang: Array<{ lang: string; href: string }>;
   hasViewport: boolean;
   structuredDataTypes: string[];
+  /** h1–h6 in document order (first 80), for topic and outline comparisons. */
+  headings: Array<{ level: number; text: string }>;
+  /** Parsed JSON-LD blocks (at most 20, 64 KB together), for schema conflict checks. */
+  jsonLd: unknown[];
+  /** Content images with an absolute src (first 100); alt null = attribute missing. */
+  images: Array<{ src: string; alt: string | null }>;
 };
+
+const MAX_HEADINGS = 80;
+const MAX_JSONLD_BLOCKS = 20;
+const MAX_JSONLD_BYTES = 64 * 1024;
+const MAX_IMAGES = 100;
 
 /** domhandler's AnyNode, reached through cheerio so it needs no dependency of its own. */
 type AnyNode = Exclude<Parameters<typeof cheerio.load>[0], string | Buffer | unknown[]>;
@@ -91,9 +102,17 @@ export function extract(html: string, pageUrl: string): Extracted {
   const $ = cheerio.load(html);
 
   const structuredDataTypes: string[] = [];
+  const jsonLd: unknown[] = [];
+  let jsonLdBytes = 0;
   $('script[type="application/ld+json" i]').each((_, el) => {
+    const raw = $(el).text();
     try {
-      jsonLdTypes(JSON.parse($(el).text()), structuredDataTypes);
+      const parsed: unknown = JSON.parse(raw);
+      jsonLdTypes(parsed, structuredDataTypes);
+      if (jsonLd.length < MAX_JSONLD_BLOCKS && jsonLdBytes + raw.length <= MAX_JSONLD_BYTES) {
+        jsonLd.push(parsed);
+        jsonLdBytes += raw.length;
+      }
     } catch {
       /* malformed JSON-LD is reported by its own rule, not here */
     }
@@ -131,6 +150,12 @@ export function extract(html: string, pageUrl: string): Extracted {
     const text = collapse($(el).text());
     if (text) h1s.push(text);
   });
+  const headings: Array<{ level: number; text: string }> = [];
+  $("h1, h2, h3, h4, h5, h6").each((_, el) => {
+    if (headings.length >= MAX_HEADINGS) return;
+    const text = collapse($(el).text()).slice(0, 200);
+    if (text && "tagName" in el) headings.push({ level: Number(el.tagName.slice(1)), text });
+  });
 
   const bodyText = normalizeText(visibleText($("body").get()));
   const wordCount = bodyText ? bodyText.split(" ").filter((w) => w.length > 1).length : 0;
@@ -138,11 +163,14 @@ export function extract(html: string, pageUrl: string): Extracted {
   let imagesTotal = 0;
   let imagesMissingAlt = 0;
   const imagesWithoutAlt: Array<{ src: string; context: string }> = [];
+  const images: Array<{ src: string; alt: string | null }> = [];
   $("img").each((_, el) => {
     imagesTotal++;
     const $el = $(el);
     const alt = $el.attr("alt");
     const src = $el.attr("src") ?? $el.attr("data-src") ?? "";
+    const absolute = src && !src.startsWith("data:") ? absoluteUrl(src.trim(), docBase) : null;
+    if (absolute && images.length < MAX_IMAGES) images.push({ src: absolute, alt: alt === undefined ? null : collapse(alt) });
     // A decorative image opts out with alt="" — that is correct, not a defect.
     if (alt === undefined) {
       imagesMissingAlt++;
@@ -207,6 +235,9 @@ export function extract(html: string, pageUrl: string): Extracted {
     hreflang,
     hasViewport: metaContent("viewport").length > 0,
     structuredDataTypes: [...new Set(structuredDataTypes)],
+    headings,
+    jsonLd,
+    images,
   };
 }
 

@@ -69,7 +69,20 @@ export type AuditAction =
   | "alert.test"
   | "integration.connect"
   | "integration.disconnect"
-  | "integration.test";
+  | "integration.test"
+  | "content.create"
+  | "content.update"
+  | "content.delete"
+  | "content.import"
+  | "content.publish_request"
+  | "content.publish"
+  | "content.publish_reject"
+  | "content.publish_rollback"
+  | "schema.propose"
+  | "robots.propose"
+  | "sitemap.propose"
+  | "report.delete"
+  | "report.brand_update";
 
 export async function record(input: {
   orgId: string;

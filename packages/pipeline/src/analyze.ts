@@ -17,6 +17,7 @@ import {
   eq,
   fixProposals,
   inArray,
+  pageDetails,
   pageSnapshots,
   projects,
   seoIssues,
@@ -236,6 +237,7 @@ async function analyzeRun(
       .returning({ id: pageSnapshots.id, normalizedUrl: pageSnapshots.normalizedUrl });
     for (const row of written) snapshotIdByUrl.set(row.normalizedUrl, row.id);
   }
+  await persistPageDetails(project.id, runId, crawlResult, snapshotIdByUrl);
   await beat();
 
   // ---- rules -------------------------------------------------------------
@@ -317,6 +319,71 @@ async function analyzeRun(
     canceled: false,
     skipped: false,
   };
+}
+
+/** Internal links kept per page: enough for the link graph without storing every footer link twice. */
+const MAX_LINKS_PER_PAGE = 300;
+/** Runs whose page details are kept per project; older graphs are pruned. */
+const KEEP_DETAIL_RUNS = 3;
+
+/**
+ * The crawl graph and page structure (see page_details) for internal linking,
+ * schema markup and the sitemap generator. Upserted like the snapshots, so a
+ * retried run converges; details of all but the newest runs are pruned.
+ */
+async function persistPageDetails(
+  projectId: string,
+  runId: string,
+  crawlResult: CrawlResult,
+  snapshotIdByUrl: Map<string, string>,
+): Promise<void> {
+  const rows: Array<typeof pageDetails.$inferInsert> = [];
+  const done = new Set<string>();
+  for (const page of crawlResult.pages) {
+    const snapshotId = snapshotIdByUrl.get(page.normalizedUrl);
+    if (!snapshotId || done.has(snapshotId)) continue;
+    done.add(snapshotId);
+    const x = page.extracted;
+    rows.push({
+      snapshotId,
+      auditRunId: runId,
+      projectId,
+      links: (x?.links ?? [])
+        .filter((l) => l.internal && l.url !== page.normalizedUrl)
+        .slice(0, MAX_LINKS_PER_PAGE)
+        .map((l) => ({ u: l.url, a: l.anchor.slice(0, 100), ...(l.nofollow ? { nf: 1 as const } : {}) })),
+      headings: (x?.headings ?? []).map((h) => ({ l: h.level, t: h.text })),
+      jsonLd: x?.jsonLd ?? [],
+      images: x?.images ?? [],
+      lastModified: page.lastModified ? new Date(page.lastModified) : null,
+    });
+  }
+  for (const chunk of chunks(rows, INSERT_CHUNK)) {
+    await db
+      .insert(pageDetails)
+      .values(chunk)
+      .onConflictDoUpdate({
+        target: pageDetails.snapshotId,
+        set: {
+          links: sqlExcluded("links"),
+          headings: sqlExcluded("headings"),
+          jsonLd: sqlExcluded("json_ld"),
+          images: sqlExcluded("images"),
+          lastModified: sqlExcluded("last_modified"),
+        },
+      });
+  }
+  await db.execute(sql`
+    DELETE FROM page_details d
+     WHERE d.project_id = ${projectId}
+       AND d.audit_run_id <> ${runId}
+       AND d.audit_run_id NOT IN (
+         SELECT r.id FROM audit_runs r
+          WHERE r.project_id = ${projectId} AND r.status = 'SUCCEEDED'
+          ORDER BY r.finished_at DESC NULLS LAST
+          LIMIT ${KEEP_DETAIL_RUNS - 1}
+       )
+  `);
 }
 
 /**

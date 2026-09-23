@@ -19,6 +19,7 @@
     "@seo/db": "workspace:*",
     "cheerio": "^1.0.0",
     "cron-parser": "4.9.0",
+    "vazirmatn": "33.0.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {

@@ -42,6 +42,8 @@ export type CrawledPage = {
   xRobotsTag: string | null;
   /** For a 3xx: the URL the Location header points at, normalised. */
   redirectTarget: string | null;
+  /** The Last-Modified header as an ISO timestamp, when present and parseable (sitemap lastmod). */
+  lastModified?: string | null;
   extracted: Extracted | null;
   indexable: boolean;
   noindexReason: string | null;
@@ -370,6 +372,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
 
       const html = isHtmlType(contentType);
       const extracted = html && res.body.length ? extract(decodeHtml(res.body, contentType), current) : null;
+      const lastModified = Date.parse(res.headers.get("last-modified") ?? "");
       const result = page(item, {
         statusCode: res.status,
         responseMs: ms,
@@ -380,6 +383,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
         redirectTarget: null,
         extracted,
         isHtml: html,
+        lastModified: Number.isFinite(lastModified) ? new Date(lastModified).toISOString() : null,
       });
       return { result, redirectUrl: null };
     }

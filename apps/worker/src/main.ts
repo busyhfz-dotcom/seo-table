@@ -1,6 +1,6 @@
 /**
  * Worker process. BullMQ workers (scans, fix executions, and the SEO data jobs:
- * rank sync, PageSpeed, competitor snapshots, alert delivery), the schedule
+ * rank sync, PageSpeed, competitor snapshots, alert delivery, PDF reports), the schedule
  * loop, and a tiny HTTP server for health checks, because Railway needs
  * something to probe and "is the queue draining" is the question worth
  * answering.
@@ -15,6 +15,7 @@ import {
   NOTIFY_QUEUE,
   PAGESPEED_QUEUE,
   RANK_QUEUE,
+  REPORT_QUEUE,
   auditJobId,
   auditQueue,
   childLogger,
@@ -36,6 +37,7 @@ import {
   type NotifyJobData,
   type PageSpeedJobData,
   type RankJobData,
+  type ReportJobData,
 } from "@seo/core";
 import { closeDb, pingDb, pool } from "@seo/db";
 import { BrowserManager } from "@seo/browser";
@@ -47,6 +49,7 @@ import {
   runCompetitorJob,
   runPageSpeedJob,
   runRankJob,
+  runReportJob,
   scheduleService,
 } from "@seo/seo-data";
 import { browserApi } from "./browser-api.js";
@@ -89,16 +92,17 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 // schema; /api/ready stays 503 until the workers run.
 // Railway injects PORT for every service; the worker binds its health server to it.
 const port = env().PORT ?? 3001;
+const browser = () =>
+  (browserManager ??= new BrowserManager({
+    maxSessions: env().BROWSER_MAX_SESSIONS,
+    maxSessionsPerOrg: env().BROWSER_MAX_SESSIONS_PER_ORG,
+    maxRenders: env().BROWSER_MAX_RENDERS,
+    idleMs: env().BROWSER_IDLE_TIMEOUT_MS,
+    maxSessionMs: env().BROWSER_MAX_SESSION_MS,
+    executablePath: env().BROWSER_EXECUTABLE_PATH,
+  }));
 const handleBrowser = browserApi({
-  manager: () =>
-    (browserManager ??= new BrowserManager({
-      maxSessions: env().BROWSER_MAX_SESSIONS,
-      maxSessionsPerOrg: env().BROWSER_MAX_SESSIONS_PER_ORG,
-      maxRenders: env().BROWSER_MAX_RENDERS,
-      idleMs: env().BROWSER_IDLE_TIMEOUT_MS,
-      maxSessionMs: env().BROWSER_MAX_SESSION_MS,
-      executablePath: env().BROWSER_EXECUTABLE_PATH,
-    })),
+  manager: browser,
   sessionSecret: env().SESSION_SECRET,
   draining: () => shuttingDown,
 });
@@ -379,6 +383,12 @@ dataWorkers.push(
     },
     { ...dataOpts, concurrency: 4, lockDuration: 60_000 },
   ),
+  // PDF reports print with the same Chromium as the in-panel browser (one at a time: memory).
+  new Worker<ReportJobData>(REPORT_QUEUE, async (job) => runReportJob(job.data, (html, opts) => browser().pdf(html, opts)), {
+    ...dataOpts,
+    concurrency: 1,
+    lockDuration: 300_000,
+  }),
 );
 
 // ---- schedules --------------------------------------------------------------

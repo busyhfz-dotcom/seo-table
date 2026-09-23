@@ -83,6 +83,8 @@ export {
 export {
   parseRobots,
   isAllowed,
+  normalizeRobotsPath,
+  productToken,
   crawlDelayFor,
   parseSitemap,
   decodeSitemapBody,

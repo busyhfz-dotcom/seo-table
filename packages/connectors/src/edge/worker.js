@@ -8,7 +8,10 @@
  *   r:<host><path?query>   redirect rule  {to, status, external?}
  *   p:<host><path?query>   page rule      {title, description, canonical, robots,
  *                                          alts: {<image key>: alt}, jsonld: [..], hreflang: [{lang, href}]}
- *   m                      manifest       {v: 1, keys: [every r:/p: key that exists]}
+ *   f:<host><path>         file override  {kind: "robots" | "sitemap", body} served
+ *                                          instead of the origin's /robots.txt or a root
+ *                                          sitemap file (keys.js isFilePath)
+ *   m                      manifest       {v: 1, keys: [every r:/p:/f: key that exists]}
  *   cfg:bypass             shared secret; a request carrying it in
  *                          x-seo-table-bypass gets the origin response untouched,
  *                          which is how the panel reads the site's own values.
@@ -40,9 +43,11 @@ import {
   BYPASS_KEY,
   EDGE_HEADER,
   MANIFEST_KEY,
+  fileKey,
   hostKey,
   imageKey,
   imageStem,
+  isFilePath,
   pageKey,
   pathKey,
   redirectKey,
@@ -57,6 +62,9 @@ const EXCLUDED_PATHS = ["/wp-admin", "/wp-login.php", "/wp-json", "/wp-cron.php"
 const SESSION_COOKIE = /(?:^|;\s*)(?:wordpress_logged_in_|wordpress_sec_|wp-postpass_)/i;
 const SESSION_SET_COOKIE = /(?:^|[\s,])(?:wordpress_logged_in_|wordpress_sec_|wp-postpass_)/i;
 const REDIRECT_STATUSES = [301, 302, 307, 308];
+const FILE_TYPES = { robots: "text/plain; charset=utf-8", sitemap: "application/xml; charset=utf-8" };
+/** Short, so replacing or removing an override reaches crawlers within minutes. */
+const FILE_MAX_AGE = 300;
 
 // ---------------------------------------------------------------- rules
 
@@ -132,6 +140,19 @@ function redirectResponse(rule, request) {
   });
 }
 
+/** A stored file override as a response, or null when the document is unusable (the origin then answers). */
+function fileResponse(doc, method) {
+  if (!doc || typeof doc.body !== "string" || !Object.hasOwn(FILE_TYPES, doc.kind)) return null;
+  return new Response(method === "HEAD" ? null : doc.body, {
+    status: 200,
+    headers: {
+      "content-type": FILE_TYPES[doc.kind],
+      "cache-control": `public, max-age=${FILE_MAX_AGE}`,
+      [EDGE_HEADER]: "file",
+    },
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     ctx.passThroughOnException();
@@ -152,6 +173,13 @@ export default {
       }
 
       const keys = await manifest(env);
+      if (isFilePath(url.pathname)) {
+        const fKey = await fileKey(url.href);
+        if (keys.has(fKey)) {
+          const file = fileResponse(await cached(env, fKey), method);
+          if (file) return file;
+        }
+      }
       const rKey = await redirectKey(url.href);
       if (keys.has(rKey)) {
         const redirect = redirectResponse(await cached(env, rKey), request);

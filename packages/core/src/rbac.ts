@@ -33,6 +33,9 @@ export const PERMISSIONS = [
   "tracking:write",
   // Organization-wide paid data sources and alert channels (credentials).
   "integration:manage",
+  // Content editor documents: write, import, analyse, and ask for WordPress publishing
+  // (publishing itself needs fix:approve_sensitive).
+  "content:write",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -48,6 +51,7 @@ const EDITOR: Permission[] = [
   "fix:apply_low_risk",
   "report:write",
   "tracking:write",
+  "content:write",
 ];
 
 const ADMIN: Permission[] = [

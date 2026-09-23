@@ -29,7 +29,19 @@
  */
 import { randomBytes } from "node:crypto";
 import type { FixAction } from "@seo/db";
-import { BYPASS_HEADER, BYPASS_KEY, EDGE_HEADER, MANIFEST_KEY, imageKey, pageKey, redirectKey } from "./edge/keys.js";
+import { BlockedAddressError, env, guardedFetch } from "@seo/core";
+import {
+  BYPASS_HEADER,
+  BYPASS_KEY,
+  CACHE_BUSTER,
+  EDGE_HEADER,
+  MANIFEST_KEY,
+  fileKey,
+  imageKey,
+  isFilePath,
+  pageKey,
+  redirectKey,
+} from "./edge/keys.js";
 import { WORKER_MODULES, WORKER_VERSION } from "./edge/worker-source.js";
 import { fetchLivePage, liveField } from "./live-page.js";
 import {
@@ -55,8 +67,24 @@ const API = "https://api.cloudflare.com/client/v4";
 const COMPATIBILITY_DATE = "2025-09-01";
 const VERSION_KEY = "cfg:version";
 const PAGE_FIELDS = ["title", "meta_description", "canonical", "meta_robots", "img.alt", "jsonld", "hreflang"] as const;
-const WRITABLE_FIELDS = [...PAGE_FIELDS, "redirect"];
-const SUPPORTED_ACTIONS: FixAction[] = ["TITLE_REWRITE", "META_REWRITE", "CANONICAL_FIX", "ROBOTS_FIX", "ALT_TEXT", "REDIRECT"];
+/** Whole files the worker serves in place of the origin's (keys.js isFilePath decides which paths). */
+const FILE_FIELDS: Record<string, FileRule["kind"]> = { robots_txt: "robots", sitemap_xml: "sitemap" };
+const WRITABLE_FIELDS = [...PAGE_FIELDS, "redirect", ...Object.keys(FILE_FIELDS)];
+const SUPPORTED_ACTIONS: FixAction[] = [
+  "TITLE_REWRITE",
+  "META_REWRITE",
+  "CANONICAL_FIX",
+  "ROBOTS_FIX",
+  "ALT_TEXT",
+  "REDIRECT",
+  "SCHEMA_MARKUP",
+  "ROBOTS_TXT",
+  "SITEMAP_XML",
+];
+/** Google reads at most 500 KiB of robots.txt; a larger file is a mistake, not a rule set. */
+const MAX_ROBOTS_BYTES = 500 * 1024;
+/** Under Workers KV's 25 MiB value limit, with room for the worker to hold it in memory. */
+const MAX_SITEMAP_BYTES = 10 * 1024 * 1024;
 /** Rule document property for each page field. */
 const RULE_PROP: Record<(typeof PAGE_FIELDS)[number], keyof PageRule> = {
   title: "title",
@@ -91,6 +119,7 @@ type PageRule = {
   hreflang?: Array<{ lang: string; href: string }>;
 };
 type RedirectRule = { to: string; status: number; external?: true };
+type FileRule = { kind: "robots" | "sitemap"; body: string };
 type Manifest = { v: 1; keys: string[] };
 
 type Envelope<T> = {
@@ -321,7 +350,7 @@ export function cloudflare(creds: CloudflareCredentials): Connector & {
   async function listRuleKeys(): Promise<string[]> {
     const { s, ns } = await namespace();
     const out: string[] = [];
-    for (const prefix of ["p", "r"]) {
+    for (const prefix of ["p", "r", "f"]) {
       let cursor = "";
       for (let i = 0; i < 1000; i++) {
         const env = await ok<Array<{ name: string }>>(
@@ -390,7 +419,7 @@ export function cloudflare(creds: CloudflareCredentials): Connector & {
       };
     }
     const notes = [
-      "Cloudflare edge: title, meta description, canonical, robots, image alt text and redirects are applied at Cloudflare's edge; nothing is installed on the site.",
+      "Cloudflare edge: title, meta description, canonical, robots, image alt text, redirects, JSON-LD, robots.txt and sitemap files are applied at Cloudflare's edge; nothing is installed on the site.",
       "Edge changes reach every Cloudflare location within about a minute.",
     ];
     if (st.outdated) notes.push("The edge worker on Cloudflare is outdated: reinstall it to update.");
@@ -539,6 +568,10 @@ export function cloudflare(creds: CloudflareCredentials): Connector & {
     await site();
     assertOnSite(req.url);
     if (req.field === "redirect") return (await kvGetJson<RedirectRule>(await redirectKey(req.url)))?.to ?? null;
+    if (FILE_FIELDS[req.field]) {
+      assertFilePath(req.url, req.field);
+      return (await kvGetJson<FileRule>(await fileKey(req.url)))?.body ?? null;
+    }
     const rule = (await kvGetJson<PageRule>(await pageKey(req.url))) ?? {};
     return ruleValue(rule, req.field, req.url, req.selector);
   }
@@ -554,6 +587,7 @@ export function cloudflare(creds: CloudflareCredentials): Connector & {
   async function read(req: Pick<WriteRequest, "url" | "field" | "selector">): Promise<string | null> {
     const override = await readStored(req);
     if (override !== null || req.field === "redirect" || req.field === "jsonld" || req.field === "hreflang") return override;
+    if (FILE_FIELDS[req.field]) return readOriginFile(req.url, await bypassSecret());
     const page = await fetchLivePage(req.url, { [BYPASS_HEADER]: await bypassSecret() });
     // A rewritten response means the worker did not recognise the secret (still
     // propagating, or tampered with): the site's own value is not what we got.
@@ -573,6 +607,22 @@ export function cloudflare(creds: CloudflareCredentials): Connector & {
       assertOnSite(req.url);
       if (!WRITABLE_FIELDS.includes(req.field)) {
         return fail("unsupported_field", `The Cloudflare edge cannot write "${req.field}".`);
+      }
+
+      const fileKind = FILE_FIELDS[req.field];
+      if (fileKind) {
+        assertFilePath(req.url, req.field);
+        const key = await fileKey(req.url);
+        const previous = (await kvGetJson<FileRule>(key))?.body ?? null;
+        if (req.after === null) {
+          await kvDelete(key);
+          await updateManifest(null, key);
+          return { url: req.url, field: req.field, ok: true, applied: null, previous };
+        }
+        const body = fileBody(fileKind, req.after);
+        await kvPut(key, JSON.stringify({ kind: fileKind, body } satisfies FileRule));
+        await updateManifest(key, null);
+        return { url: req.url, field: req.field, ok: true, applied: body, previous };
       }
 
       if (req.field === "redirect") {
@@ -636,7 +686,57 @@ export function cloudflare(creds: CloudflareCredentials): Connector & {
 // ---- rule documents -------------------------------------------------------------
 
 function isRuleKey(name: string): boolean {
-  return /^[pr][:#]/.test(name);
+  return /^[prf][:#]/.test(name);
+}
+
+/** robots_txt lives only at /robots.txt, sitemap_xml only at a root sitemap path. */
+function assertFilePath(url: string, field: string): void {
+  const path = new URL(url).pathname;
+  const ok = field === "robots_txt" ? path === "/robots.txt" : field === "sitemap_xml" && path !== "/robots.txt" && isFilePath(path);
+  if (!ok) throw new ConnectorError("invalid_value", `${url} is not where a ${field === "robots_txt" ? "robots.txt" : "sitemap"} file can be served.`);
+}
+
+/** The stored file, refused when it cannot be what its kind claims. */
+function fileBody(kind: FileRule["kind"], value: string): string {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (kind === "robots") {
+    if (bytes > MAX_ROBOTS_BYTES) throw new ConnectorError("invalid_value", "robots.txt is larger than the 500 KiB search engines read.");
+    if (/<\s*(html|body|head)\b/i.test(value)) throw new ConnectorError("invalid_value", "That is an HTML page, not a robots.txt file.");
+    return value;
+  }
+  if (bytes > MAX_SITEMAP_BYTES) throw new ConnectorError("invalid_value", "The sitemap file is larger than 10 MB; split it.");
+  if (!/^\s*(<\?xml[^>]*\?>\s*)?<(urlset|sitemapindex)\b/i.test(value)) {
+    throw new ConnectorError("invalid_value", "A sitemap must be an XML <urlset> or <sitemapindex> document.");
+  }
+  return value;
+}
+
+/**
+ * The origin's own file behind the edge (the bypass header makes the worker
+ * step aside). 404/410 means the site has none; anything else unreadable throws,
+ * because "unknown" must never be mistaken for "empty".
+ */
+async function readOriginFile(url: string, bypass: string): Promise<string | null> {
+  const busted = new URL(url);
+  busted.searchParams.set(CACHE_BUSTER, randomBytes(6).toString("hex"));
+  let res;
+  try {
+    res = await guardedFetch(busted.toString(), {
+      headers: { "user-agent": env().CRAWLER_USER_AGENT, "cache-control": "no-cache", pragma: "no-cache", [BYPASS_HEADER]: bypass },
+      timeoutMs: 20_000,
+      maxBytes: MAX_SITEMAP_BYTES,
+    });
+  } catch (err) {
+    if (err instanceof BlockedAddressError) throw new ConnectorError("blocked_address", err.message);
+    throw new ConnectorError("page_unreachable", `Could not load ${url}: ${(err as Error).message}`);
+  }
+  if (res.headers.get(EDGE_HEADER) === "file") {
+    throw new ConnectorError("bypass_failed", "The edge worker did not step aside for the panel's read; try again in a minute.");
+  }
+  if (res.status === 404 || res.status === 410) return null;
+  if (res.status !== 200) throw new ConnectorError("page_unavailable", `${url} answered HTTP ${res.status}; its content cannot be read.`);
+  if (res.truncated) throw new ConnectorError("response_too_large", `${url} is too large to read.`);
+  return res.body.toString("utf8");
 }
 
 function ruleValue(rule: PageRule, field: string, url: string, selector?: string): string | null {

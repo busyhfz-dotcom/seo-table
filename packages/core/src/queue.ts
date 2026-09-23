@@ -66,7 +66,11 @@ export type CompetitorJobData = DataJobBase & {
   /** One competitor, or every competitor of the project when absent. */
   competitorId?: string;
 };
-export type ReportJobData = DataJobBase & { kind: "audit" | "executive" | "keywords" };
+export type ReportJobData = DataJobBase & {
+  kind: "audit" | "executive" | "keywords";
+  /** The report's language; absent = the project's locale. */
+  locale?: "fa" | "en";
+};
 export type NotifyJobData = { notificationId: string; channel: "webhook" | "telegram" };
 
 /**

@@ -274,6 +274,9 @@ importers:
       cron-parser:
         specifier: 4.9.0
         version: 4.9.0
+      vazirmatn:
+        specifier: 33.0.3
+        version: 33.0.3
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -3156,6 +3159,9 @@ packages:
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
+
+  vazirmatn@33.0.3:
+    resolution: {integrity: sha512-fbjNc0CMjazZpIegWzz9OHGzI1APFboT+x7ZecXlUCtDe/nkyx7gtCTZnWS/+eeXG7fbfXymCPKJI8EsnM3iqw==}
 
   vite-node@2.1.9:
     resolution: {integrity: sha512-AM9aQ/IPrW/6ENLQg3AGY4K1N2TGZdR5e4gu/MmmR2xR3Ll1+dib+nook92g4TV3PXVyeyxdWwtaCAiUL0hMxA==}
@@ -6069,6 +6075,8 @@ snapshots:
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
+
+  vazirmatn@33.0.3: {}
 
   vite-node@2.1.9(@types/node@22.20.4):
     dependencies:

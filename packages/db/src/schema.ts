@@ -78,6 +78,10 @@ export const fixActionEnum = pgEnum("fix_action", [
   "REDIRECT",
   "URL_CHANGE",
   "PAGE_MERGE",
+  // 0008: site-level changes applied as whole documents (edge overrides).
+  "SCHEMA_MARKUP",
+  "ROBOTS_TXT",
+  "SITEMAP_XML",
 ]);
 export const fixStatusEnum = pgEnum("fix_status", [
   "DRAFT",
@@ -119,6 +123,8 @@ export const organizations = pgTable("organizations", {
   id: id(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  /** White-label brand for generated reports; null = the organization's name, default colour, no logo. */
+  reportBrand: jsonb("report_brand").$type<ReportBrand | null>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -290,6 +296,40 @@ export const pageSnapshots = pgTable(
     index("page_snapshots_project_url_idx").on(t.projectId, t.normalizedUrl),
     index("page_snapshots_hash_idx").on(t.contentHash),
   ],
+);
+
+/**
+ * What a scan saw on a page beyond the snapshot's columns: its internal links
+ * (the crawl graph), headings, JSON-LD blocks, images and Last-Modified header.
+ * One row per snapshot, kept in its own table so the many queries that read
+ * whole snapshot rows do not drag these documents along, and so it can be
+ * pruned to the latest runs (the graph of a run from last year helps nobody).
+ * Rows exist for scans from migration 0008 on; older runs have none.
+ */
+export const pageDetails = pgTable(
+  "page_details",
+  {
+    snapshotId: varchar("snapshot_id", { length: 30 })
+      .primaryKey()
+      .references(() => pageSnapshots.id, { onDelete: "cascade" }),
+    auditRunId: varchar("audit_run_id", { length: 30 })
+      .notNull()
+      .references(() => auditRuns.id, { onDelete: "cascade" }),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Internal links, normalised, capped per page: {u: url, a: anchor, nf?: nofollow}. */
+    links: jsonb("links").notNull().default(sql`'[]'::jsonb`).$type<PageLink[]>(),
+    /** h1–h6 in document order, capped: {l: level, t: text}. */
+    headings: jsonb("headings").notNull().default(sql`'[]'::jsonb`).$type<PageHeading[]>(),
+    /** Parsed JSON-LD blocks as the page serves them, capped by size. */
+    jsonLd: jsonb("json_ld").notNull().default(sql`'[]'::jsonb`).$type<unknown[]>(),
+    /** Content images, absolute src, capped: {src, alt} (alt null = attribute missing). */
+    images: jsonb("images").notNull().default(sql`'[]'::jsonb`).$type<PageImage[]>(),
+    /** The Last-Modified response header, when the server sent a valid one. */
+    lastModified: timestamp("last_modified", { withTimezone: true }),
+  },
+  (t) => [index("page_details_run_idx").on(t.auditRunId), index("page_details_project_idx").on(t.projectId)],
 );
 
 // ---------------------------------------------------------------- issues
@@ -820,6 +860,11 @@ export const contentDocuments = pgTable(
     score: integer("score"),
     analysis: jsonb("analysis"),
     url: text("url"),
+    /** The SEO title and meta description the document is written for (0008). */
+    metaTitle: text("meta_title"),
+    metaDescription: text("meta_description"),
+    /** WordPress publishing: the request, its decision and outcome (see content/publish.ts). */
+    publish: jsonb("publish").$type<ContentPublishState | null>(),
     createdById: text("created_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -949,6 +994,36 @@ export type IntegrationKind = "DATAFORSEO" | "PAGESPEED" | "TELEGRAM_ALERTS";
 export type ReportKind = "audit" | "executive" | "keywords";
 export type LocalizedText = { fa: string; en: string };
 export type ReportBrand = { logo?: string; name?: string; color?: string };
+export type PageLink = { u: string; a: string; nf?: 1 };
+export type PageHeading = { l: number; t: string };
+export type PageImage = { src: string; alt: string | null };
+
+/**
+ * A content document's WordPress publishing lifecycle. Content changes are
+ * SENSITIVE: a request waits for a person with approval rights, and the
+ * decision performs the write.
+ */
+export type ContentPublishState = {
+  /** publishing: approved and being written right now (a claim, so two approvals cannot both write). */
+  status: "pending" | "publishing" | "rejected" | "published" | "failed" | "rolled_back";
+  /** draft: a new WordPress draft; update: replace the content of the post at the document's URL. */
+  mode: "draft" | "update";
+  postType: string;
+  requestedBy: string;
+  requestedAt: string;
+  /** sha256 of title + body at request time; a later edit invalidates the request. */
+  bodyHash: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  reason?: string;
+  post?: { id: number; restBase: string; link: string | null; status: string | null };
+  /** update mode: what the post held before, for rollback. */
+  previous?: { title: string; content: string };
+  /** What was written, so rollback can tell whether someone edited it since. */
+  written?: { title: string; content: string };
+  publishedAt?: string;
+  error?: string;
+};
 
 export type HeadingSummary = {
   counts: { h1: number; h2: number; h3: number; h4: number; h5: number; h6: number };
@@ -996,3 +1071,4 @@ export type Notification = typeof notifications.$inferSelect;
 export type OrgIntegration = typeof orgIntegrations.$inferSelect;
 export type ContentDocument = typeof contentDocuments.$inferSelect;
 export type Report = typeof reports.$inferSelect;
+export type PageDetails = typeof pageDetails.$inferSelect;

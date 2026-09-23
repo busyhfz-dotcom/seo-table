@@ -8,5 +8,7 @@ export declare function hostKey(hostname: string): string;
 export declare function pathKey(url: string): string;
 export declare function pageKey(url: string): Promise<string>;
 export declare function redirectKey(url: string): Promise<string>;
+export declare function isFilePath(pathname: string): boolean;
+export declare function fileKey(url: string): Promise<string>;
 export declare function imageKey(src: string, pageUrl: string): string;
 export declare function imageStem(key: string): string;

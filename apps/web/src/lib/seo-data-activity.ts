@@ -77,6 +77,34 @@ export function describeSeoDataAction(action: string, metadata: unknown, locale:
       return fa ? `${integration} تنظیم شد` : `${integration} configured`;
     case "integration.disconnect":
       return fa ? `${integration} حذف شد` : `${integration} removed`;
+    case "content.create":
+      return fa ? "سند محتوایی ساخته شد" : "Content document created";
+    case "content.update":
+      return fa ? "سند محتوایی ویرایش شد" : "Content document edited";
+    case "content.delete":
+      return fa ? "سند محتوایی حذف شد" : "Content document deleted";
+    case "content.import":
+      return fa ? "صفحه‌ای از سایت به ویرایشگر محتوا وارد شد" : "A site page was imported into the content editor";
+    case "content.publish_request":
+      return fa ? "درخواست انتشار در وردپرس ثبت شد" : "Publishing to WordPress was requested";
+    case "content.publish":
+      return m.status === "failed" ? (fa ? "انتشار در وردپرس تأیید شد اما ناموفق بود" : "Publishing to WordPress was approved but failed") : fa ? "انتشار در وردپرس تأیید و انجام شد" : "Publishing to WordPress was approved and done";
+    case "content.publish_reject":
+      return fa ? "درخواست انتشار در وردپرس رد شد" : "Publishing to WordPress was rejected";
+    case "content.publish_rollback":
+      return fa ? "انتشار در وردپرس برگردانده شد" : "Publishing to WordPress was rolled back";
+    case "schema.propose":
+      return fa ? "نشانه‌گذاری ساختاریافته برای تأیید پیشنهاد شد" : "Structured data proposed for approval";
+    case "robots.propose":
+      return fa ? "robots.txt تازه برای تأیید پیشنهاد شد" : "A new robots.txt was proposed for approval";
+    case "sitemap.propose":
+      return fa ? `نقشهٔ سایت با ${n(m.urls)} نشانی برای تأیید پیشنهاد شد` : `A sitemap with ${n(m.urls)} URLs was proposed for approval`;
+    case "report.create":
+      return fa ? "ساخت گزارش PDF درخواست شد" : "A PDF report was requested";
+    case "report.delete":
+      return fa ? "گزارش حذف شد" : "Report deleted";
+    case "report.brand_update":
+      return fa ? "نشان تجاری گزارش‌ها تغییر کرد" : "Report branding changed";
     case "integration.test":
       return m.ok === false ? (fa ? `آزمون ${integration} ناموفق بود` : `${integration} test failed`) : fa ? `${integration} آزموده شد` : `${integration} tested`;
     default:

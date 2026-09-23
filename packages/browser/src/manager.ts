@@ -15,6 +15,7 @@ import { newHardenedContext, userAgentFor, type UiLocale } from "./context.js";
 import { HostGuard } from "./guard.js";
 import { startGuardedProxy, type GuardedProxy } from "./proxy.js";
 import { renderPage } from "./render.js";
+import { printPdf, type PdfOptions } from "./pdf.js";
 import { BrowserSession, normaliseTarget } from "./session.js";
 import type {
   ActionResult,
@@ -89,9 +90,13 @@ export class BrowserManager {
 
   // ---- lifecycle -------------------------------------------------------------
 
-  private async ensureBrowser(): Promise<Browser> {
+  /**
+   * `forPdf`: report printing is the worker's own job, not a remote browser, so
+   * it runs even where BROWSER_MAX_SESSIONS=0 turns the interactive browser off.
+   */
+  private async ensureBrowser(forPdf = false): Promise<Browser> {
     if (this.closed) throw new BrowserUnavailable("The browser is shutting down");
-    if (this.opts.maxSessions <= 0) throw new BrowserUnavailable("The browser is turned off on this server");
+    if (this.opts.maxSessions <= 0 && !forPdf) throw new BrowserUnavailable("The browser is turned off on this server");
     this.lastUsedAt = Date.now();
     if (this.browser?.isConnected()) return this.browser;
     this.launching ??= this.launch().finally(() => {
@@ -267,6 +272,22 @@ export class BrowserManager {
 
   async closeSession(owner: Owner, id: string): Promise<void> {
     await this.dispose(this.get(owner, id), "closed_by_user");
+  }
+
+  // ---- pdf -------------------------------------------------------------------
+
+  /** Print a self-contained HTML document to an A4 PDF (reports). Shares the render slots. */
+  async pdf(html: string, options: PdfOptions = {}): Promise<Buffer> {
+    if (this.renders >= this.opts.maxRenders) throw new BrowserBusy("renders");
+    this.renders++;
+    const started = Date.now();
+    try {
+      return await printPdf(await this.ensureBrowser(true), html, options);
+    } finally {
+      this.renders--;
+      this.lastUsedAt = Date.now();
+      metric("browser.pdf.ms", Date.now() - started);
+    }
   }
 
   // ---- render ----------------------------------------------------------------

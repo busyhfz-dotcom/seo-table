@@ -33,6 +33,13 @@ export const ACTION_RISK: Record<FixAction, RiskLevel> = {
   REDIRECT: "RESTRICTED",
   URL_CHANGE: "RESTRICTED",
   PAGE_MERGE: "RESTRICTED",
+  // Whole documents that change what search engines read about the site:
+  // structured data can earn (or lose) rich results and invite a manual action,
+  // robots.txt can hide the whole site, and a replaced sitemap drops every URL
+  // it no longer lists. A person decides each one.
+  SCHEMA_MARKUP: "SENSITIVE",
+  ROBOTS_TXT: "SENSITIVE",
+  SITEMAP_XML: "SENSITIVE",
 };
 
 /**

@@ -79,6 +79,21 @@ export function redirectKey(url) {
   return boundedKey("r", hostKey(new URL(url).hostname) + pathKey(url));
 }
 
+/**
+ * Whole files the edge can serve in place of the origin's: robots.txt and
+ * sitemap files at the site root (sitemap.xml, sitemap-2.xml, post-sitemap.xml…).
+ * Nothing else, so an override can never shadow a page.
+ */
+export function isFilePath(pathname) {
+  return pathname === "/robots.txt" || /^\/[A-Za-z0-9_-]*sitemap[A-Za-z0-9_-]*\.xml$/i.test(pathname);
+}
+
+/** A file override's key: host and path only, since crawlers request these files without a query. */
+export function fileKey(url) {
+  const u = new URL(url);
+  return boundedKey("f", hostKey(u.hostname) + normalizeEscapes(u.pathname || "/"));
+}
+
 /** An image's identity: host and path (scheme-less), with its query. */
 export function imageKey(src, pageUrl) {
   const u = new URL(src, pageUrl);
