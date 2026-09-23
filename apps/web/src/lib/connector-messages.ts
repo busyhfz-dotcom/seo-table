@@ -1,4 +1,5 @@
 import { DEFAULT_LOCALE, isLocale, type Locale } from "./i18n";
+import { toPersianDigits } from "./format";
 
 /**
  * Connector results in the viewer's language.
@@ -8,14 +9,14 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from "./i18n";
  * with the technical detail (HTTP status and WordPress error code) kept at the
  * end so support can still see it.
  */
-const REASONS: Record<string, Record<Locale, string>> = {
+export const REASONS: Record<string, Record<Locale, string>> = {
   invalid_credentials: {
     fa: "نام کاربری یا Application Password درست نیست. در پیشخوان وردپرس به «کاربران ← نمایه» بروید، در بخش Application Passwords یک رمز تازه بسازید و همان را اینجا وارد کنید. رمز معمولی ورود به وردپرس کار نمی‌کند.",
     en: "The username or application password is wrong. In WordPress go to Users → Profile → Application Passwords, create a new one and paste it here. Your normal login password will not work.",
   },
   credentials_not_received: {
-    fa: "وردپرس اطلاعات ورود را دریافت نکرد، چون هاست هدر Authorization را حذف می‌کند. این خط را به ابتدای فایل ‎.htaccess‎ سایت اضافه کنید و دوباره امتحان کنید: SetEnvIf Authorization \"(.*)\" HTTP_AUTHORIZATION=$1",
-    en: "WordPress did not receive the login because the host strips the Authorization header. Add this line at the top of the site's .htaccess and try again: SetEnvIf Authorization \"(.*)\" HTTP_AUTHORIZATION=$1",
+    fa: "وردپرس اطلاعات ورود را دریافت نکرد، چون هاست هدر Authorization را حذف می‌کند. این خط را به ابتدای فایل ‎.htaccess‎ سایت اضافه کنید و دوباره امتحان کنید: `SetEnvIf Authorization \"(.*)\" HTTP_AUTHORIZATION=$1`",
+    en: "WordPress did not receive the login because the host strips the Authorization header. Add this line at the top of the site's .htaccess and try again: `SetEnvIf Authorization \"(.*)\" HTTP_AUTHORIZATION=$1`",
   },
   insufficient_role: {
     fa: "این حساب وارد شد ولی اجازه‌ی ویرایش نوشته‌ها را ندارد. از حسابی با نقش «ویرایشگر» یا «مدیر کل» استفاده کنید.",
@@ -26,16 +27,16 @@ const REASONS: Record<string, Record<Locale, string>> = {
     en: "A security plugin (such as Wordfence, Solid Security/iThemes or All In One WP Security) or a host rule blocks the REST API for this account. Allow REST API access for logged-in users in that plugin's settings.",
   },
   firewall_blocked: {
-    fa: "یک فایروال یا سرویس امنیتی (مثل Cloudflare یا فایروال هاست) درخواست را پیش از رسیدن به وردپرس رد کرد. مسیر ‎/wp-json/‎ را در آن فایروال مجاز کنید.",
-    en: "A firewall or security service (such as Cloudflare or the host's firewall) rejected the request before it reached WordPress. Allow the /wp-json/ path in that firewall.",
+    fa: "یک فایروال یا سرویس امنیتی (مثل Cloudflare یا فایروال هاست) درخواست را پیش از رسیدن به وردپرس رد کرد. مسیر `/wp-json/` را در آن فایروال مجاز کنید.",
+    en: "A firewall or security service (such as Cloudflare or the host's firewall) rejected the request before it reached WordPress. Allow the `/wp-json/` path in that firewall.",
   },
   app_passwords_disabled: {
     fa: "Application Passwords در این سایت غیرفعال است (معمولاً یک افزونه‌ی امنیتی آن را خاموش کرده). آن را فعال کنید و دوباره امتحان کنید.",
     en: "Application passwords are disabled on this site (usually by a security plugin). Enable them and try again.",
   },
   rest_api_disabled: {
-    fa: "REST API وردپرس در آدرس ‎/wp-json/‎ در دسترس نیست. آدرس سایت را بررسی کنید و مطمئن شوید افزونه‌ای REST API را کامل خاموش نکرده باشد.",
-    en: "The WordPress REST API is not available at /wp-json/. Check the site address and make sure no plugin disables the REST API entirely.",
+    fa: "REST API وردپرس در آدرس `/wp-json/` در دسترس نیست. آدرس سایت را بررسی کنید و مطمئن شوید افزونه‌ای REST API را کامل خاموش نکرده باشد.",
+    en: "The WordPress REST API is not available at `/wp-json/`. Check the site address and make sure no plugin disables the REST API entirely.",
   },
   rest_api_unreachable: {
     fa: "REST API وردپرس پاسخ درستی نداد. آدرس سایت را بررسی کنید.",
@@ -50,7 +51,7 @@ const REASONS: Record<string, Record<Locale, string>> = {
     en: "That address points to an internal or private network, which this service does not connect to. Enter the site's public address.",
   },
   redirected: {
-    fa: "سایت به آدرس دیگری ریدایرکت می‌کند. آدرس نهایی سایت (همان که در مرورگر باز می‌شود، مثلاً با https یا www) را وارد کنید.",
+    fa: "سایت به آدرس دیگری ریدایرکت می‌کند. آدرس نهایی سایت (همان که در مرورگر باز می‌شود، مثلاً با `https` یا `www`) را وارد کنید.",
     en: "The site redirects to another address. Enter the final address (the one your browser ends up on, e.g. with https or www).",
   },
   response_too_large: {
@@ -58,19 +59,19 @@ const REASONS: Record<string, Record<Locale, string>> = {
     en: "The site's response was too large to read.",
   },
   no_site_access: {
-    fa: "این حساب گوگل به این property در Search Console دسترسی ندارد. ایمیل حساب سرویس را در Search Console به‌عنوان کاربر اضافه کنید.",
+    fa: "این حساب گوگل به این سایت در Search Console دسترسی ندارد. ایمیل حساب سرویس را در Search Console به‌عنوان کاربر اضافه کنید.",
     en: "This Google account has no access to the Search Console property. Add the service account's email as a user in Search Console.",
   },
   site_not_found: {
-    fa: "این property در حساب Search Console پیدا نشد. آدرس را دقیقاً مانند Search Console وارد کنید (مثلاً sc-domain:example.com).",
+    fa: "این سایت در حساب Search Console پیدا نشد. نشانی را دقیقاً مانند Search Console وارد کنید (مثلاً sc-domain:example.com).",
     en: "That property is not in this Search Console account. Enter it exactly as Search Console shows it (e.g. sc-domain:example.com).",
   },
   no_property_access: {
-    fa: "این حساب گوگل به این property در GA4 دسترسی ندارد. ایمیل حساب سرویس را با نقش Viewer به property اضافه کنید.",
+    fa: "این حساب گوگل به این ویژگی در GA4 دسترسی ندارد. ایمیل حساب سرویس را با نقش Viewer به همان ویژگی اضافه کنید.",
     en: "This Google account has no access to the GA4 property. Add the service account's email to the property with the Viewer role.",
   },
   property_not_found: {
-    fa: "property با این شناسه در GA4 وجود ندارد. شناسه‌ی عددی property را بررسی کنید.",
+    fa: "در GA4 ویژگی‌ای با این شناسه وجود ندارد. شناسه‌ی عددی ویژگی را بررسی کنید.",
     en: "No GA4 property has that id. Check the numeric property id.",
   },
   unexpected_response: {
@@ -88,27 +89,27 @@ const REASONS: Record<string, Record<Locale, string>> = {
     en: "The API token lacks this permission:",
   },
   zone_not_found: {
-    fa: "دامنه‌ی این سایت در حساب Cloudflare که این توکن به آن دسترسی دارد پیدا نشد. سایت را به Cloudflare اضافه کنید یا دسترسی توکن را به zone این دامنه بدهید.",
+    fa: "دامنه‌ی این سایت در حساب Cloudflare که این توکن به آن دسترسی دارد پیدا نشد. سایت را به Cloudflare اضافه کنید یا به توکن دسترسی به همین دامنه بدهید.",
     en: "This site's domain is not a zone this token can see in Cloudflare. Add the site to Cloudflare, or give the token access to the domain's zone.",
   },
   zone_not_active: {
-    fa: "این دامنه در Cloudflare هنوز فعال نیست؛ نیم‌سرورهای (nameserver) دامنه باید به Cloudflare اشاره کنند.",
+    fa: "این دامنه در Cloudflare هنوز فعال نیست؛ نیم‌سرورهای دامنه باید به Cloudflare اشاره کنند.",
     en: "The domain is not active in Cloudflare yet: its nameservers must point to Cloudflare.",
   },
   not_proxied: {
-    fa: "ترافیک این نشانی از Cloudflare عبور نمی‌کند (ابر خاکستری، DNS only). در بخش DNS داشبورد Cloudflare، پراکسی (ابر نارنجی) را برای رکورد این نشانی روشن کنید.",
+    fa: "ترافیک این نشانی از Cloudflare عبور نمی‌کند (ابر خاکستری، فقط DNS). در بخش DNS داشبورد Cloudflare، پراکسی (ابر نارنجی) را برای رکورد این نشانی روشن کنید.",
     en: "This address's traffic does not pass through Cloudflare (grey cloud, DNS only). In the Cloudflare DNS settings, turn on the proxy (orange cloud) for its record.",
   },
   dns_record_missing: {
-    fa: "برای این نشانی هیچ رکورد A، AAAA یا CNAME در DNS کلادفلر نیست.",
-    en: "There is no A, AAAA or CNAME record for this address in Cloudflare DNS.",
+    fa: "برای این نشانی هیچ رکورد `A`، `AAAA` یا `CNAME` در DNS حساب Cloudflare نیست.",
+    en: "There is no `A`, `AAAA` or `CNAME` record for this address in Cloudflare DNS.",
   },
   route_conflict: {
-    fa: "Worker دیگری از قبل روی این نشانی در Cloudflare فعال است. ابتدا route آن را در «Workers Routes» حذف یا جابه‌جا کنید؛ هیچ تغییری اعمال نشد.",
+    fa: "Worker دیگری از قبل روی این نشانی در Cloudflare فعال است. ابتدا مسیر آن را در بخش Workers Routes حذف یا جابه‌جا کنید؛ هیچ تغییری اعمال نشد.",
     en: "Another Worker already runs on this address in Cloudflare. Remove or move its route under Workers Routes first; nothing was changed.",
   },
   edge_not_installed: {
-    fa: "Worker لبه (edge) هنوز برای این سایت نصب نشده است.",
+    fa: "Worker لبه هنوز برای این سایت نصب نشده است.",
     en: "The edge worker is not installed for this site yet.",
   },
   bypass_failed: {
@@ -140,15 +141,15 @@ const REASONS: Record<string, Record<Locale, string>> = {
     en: "This Google account is not an Owner or Full user of the Search Console property; submitting sitemaps needs one of those roles.",
   },
   quota_exceeded: {
-    fa: "سهمیه‌ی روزانه‌ی گوگل برای این property تمام شده است (بازرسی نشانی: ۲۰۰۰ در روز). فردا دوباره امتحان کنید.",
+    fa: "سهمیه‌ی روزانه‌ی گوگل برای این سایت تمام شده است (بازرسی نشانی: ۲۰۰۰ در روز). فردا دوباره امتحان کنید.",
     en: "Google's daily quota for this property is used up (URL inspection: 2,000 a day). Try again tomorrow.",
   },
   sitemap_outside_property: {
-    fa: "این نقشه‌ی سایت داخل property متصل در Search Console نیست.",
+    fa: "این نقشه‌ی سایت داخل سایتِ متصل در Search Console نیست.",
     en: "This sitemap is not inside the connected Search Console property.",
   },
   url_outside_property: {
-    fa: "این نشانی داخل property متصل در Search Console نیست.",
+    fa: "این نشانی داخل سایتِ متصل در Search Console نیست.",
     en: "This address is not inside the connected Search Console property.",
   },
   token_exchange_failed: {
@@ -192,7 +193,7 @@ export const CONNECTOR_RESULT_CODES: Record<string, Record<Locale, string>> = {
   response_too_large: { fa: "پاسخ صفحه بیش از حد بزرگ بود", en: "The page's response was too large" },
 };
 
-const NOTES: Array<[RegExp, Record<Locale, string>]> = [
+export const NOTES: Array<[RegExp, Record<Locale, string>]> = [
   [/^SEO Table bridge plugin detected/, {
     fa: "افزونه‌ی SEO Table Bridge پیدا شد: عنوان سئو، توضیحات متا، canonical، robots و ریدایرکت‌ها قابل ویرایش‌اند.",
     en: "SEO Table bridge plugin detected: SEO title, meta description, canonical, robots and redirects are writable.",
@@ -274,7 +275,7 @@ const NOTES: Array<[RegExp, Record<Locale, string>]> = [
     en: "Other Workers own some routes on this site, so those paths are not rewritten.",
   }],
   [/^Another Worker already serves/, {
-    fa: "Worker دیگری از قبل روی این نشانی فعال است؛ تا route آن برداشته نشود، Worker لبه نصب نمی‌شود.",
+    fa: "Worker دیگری از قبل روی این نشانی فعال است؛ تا مسیر آن برداشته نشود، Worker لبه نصب نمی‌شود.",
     en: "Another Worker already runs on this address; the edge worker cannot be installed until its route is removed.",
   }],
   [/^Supplies query, impression, click and position data/, {
@@ -323,6 +324,11 @@ const NOTES: Array<[RegExp, Record<Locale, string>]> = [
   }],
 ];
 
+/** The sentence for a connector reason code alone, or null when the code is not one of ours. */
+export function reasonText(locale: Locale, reason: string | null | undefined): string | null {
+  return (reason && REASONS[reason]?.[locale]) || null;
+}
+
 export function connectorMessage(
   locale: Locale,
   result: { ok: boolean; reason?: string; message?: string },
@@ -332,7 +338,7 @@ export function connectorMessage(
     const who = message.match(/^Connected as (.+)\.$/)?.[1];
     if (who) return locale === "fa" ? `متصل شد با حساب ${who}.` : `Connected as ${who}.`;
     const zone = message.match(/^Connected to Cloudflare zone (.+)\.$/)?.[1];
-    if (zone) return locale === "fa" ? `به zone ‏${zone} در Cloudflare متصل شد.` : `Connected to Cloudflare zone ${zone}.`;
+    if (zone) return locale === "fa" ? `به دامنه‌ی ${zone} در Cloudflare متصل شد.` : `Connected to Cloudflare zone ${zone}.`;
     return message;
   }
   // A network failure's message is the raw socket error (resolver output,
@@ -342,15 +348,21 @@ export function connectorMessage(
   if (!text) return message;
   if (result.reason === "missing_permission") {
     // The permission's name as Cloudflare's token editor shows it, never translated.
-    const permission = message.match(/lacks the "([^"]+)" permission/)?.[1];
-    return permission ? `${text} ${permission}` : text;
+    // From Cloudflare's own message, or from one this function worded before (stored errors).
+    const permission =
+      message.match(/lacks the "([^"]+)" permission/)?.[1] ?? message.match(/lacks this permission: `?([^`]+?)`?$/)?.[1];
+    return permission ? `${text} \`${permission}\`` : text;
   }
   if (result.reason === "redirected") {
     const location = message.match(/redirecting to (\S+?);/)?.[1];
     return location ? `${text} (${location})` : text;
   }
-  const detail = message.match(/\((?:HTTP )?\d{3}[^)]*\)/)?.[0];
-  return detail ? `${text} ${detail}` : text;
+  // The HTTP status (and WordPress's error code) stays for support, in the reader's digits.
+  const detail = message.match(/\((?:HTTP )?(\d{3})(?: ([^)]*))?\)/);
+  if (!detail) return text;
+  const [, status, code] = detail;
+  if (locale === "en") return `${text} ${detail[0]}`;
+  return `${text} (کد ${toPersianDigits(status!)}${code ? `، \`${code}\`` : ""})`;
 }
 
 /**

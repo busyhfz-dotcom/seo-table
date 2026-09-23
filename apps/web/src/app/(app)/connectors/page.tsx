@@ -1,42 +1,60 @@
+import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { Card, Empty, Note, Status } from "../../../components/ui";
+import { Card, Empty, Note, Rich, Status } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext } from "../../../lib/page";
+import { pageContext, withProject } from "../../../lib/page";
 import { listConnectors } from "../../../lib/queries";
 import { connectorLabel } from "../../../lib/labels";
 import { can } from "@seo/core";
 import { relative } from "../../../lib/format";
 import { AWAITING_OAUTH_APP, CONNECTOR_KINDS } from "@seo/connectors";
-import { WordPressForm } from "./wordpress-form";
-import { connectorMessage, connectorNotes } from "../../../lib/connector-messages";
+import { connectStrings } from "../connect/keys";
+import { storedErrorText } from "../connect/load";
+import { GoogleConnectCard } from "./google";
 
 export const dynamic = "force-dynamic";
 
 const DESCRIPTIONS: Record<string, { fa: string; en: string }> = {
   WORDPRESS: {
-    fa: "خواندن و نوشتن عنوان، متا، متن جانشین تصویر، canonical و ریدایرکت — هر نوشتن تابع سیاست اجرای امن است.",
-    en: "Reads and writes titles, meta, image alt text, canonical and redirects — every write obeys the execution safety policy.",
+    fa: "نوشتن عنوان، متا، متن جانشین تصویر، canonical و ریدایرکت روی وردپرس — از راه API خود وردپرس یا افزونه‌ی SEO Table.",
+    en: "Writes titles, meta, image alt text, canonical and redirects to WordPress — through its own API or the SEO Table plugin.",
+  },
+  CLOUDFLARE: {
+    fa: "اعمال اصلاح‌ها در لبه‌ی Cloudflare، بدون نصب هیچ چیزی روی سایت.",
+    en: "Applies fixes at the Cloudflare edge, without installing anything on the site.",
   },
   SEARCH_CONSOLE: {
-    fa: "فقط خواندن: عبارت‌های جستجو، نمایش، کلیک و میانگین رتبه. منبع صفحه‌ی فرصت‌های محتوا.",
-    en: "Read-only: queries, impressions, clicks and average position. The source for Content Opportunities.",
+    fa: "عبارت‌های جستجو، نمایش، کلیک و میانگین رتبه برای فرصت‌های محتوا؛ به‌علاوه‌ی ثبت نقشه‌ی سایت و بازرسی نشانی.",
+    en: "Queries, impressions, clicks and average position for Content Opportunities, plus sitemap submission and URL inspection.",
   },
   GA4: {
     fa: "فقط خواندن: نشست، تعامل و تبدیل به تفکیک صفحه‌ی ورود.",
     en: "Read-only: sessions, engagement and conversions per landing page.",
   },
   INSTAGRAM: {
-    fa: "اینترفیس، مدل داده و مدیریت توکن آماده است. تا ثبت یک اپلیکیشن OAuth واقعی، هیچ داده‌ای نمایش داده نمی‌شود.",
+    fa: "رابط، مدل داده و مدیریت توکن آماده است. تا ثبت یک برنامه‌ی OAuth واقعی، هیچ داده‌ای نمایش داده نمی‌شود.",
     en: "Interface, data model and token handling are ready. Until a real OAuth application exists, no data is shown.",
   },
   YOUTUBE: {
-    fa: "اینترفیس، مدل داده و مدیریت توکن آماده است. تا ثبت یک اپلیکیشن OAuth واقعی، هیچ داده‌ای نمایش داده نمی‌شود.",
+    fa: "رابط، مدل داده و مدیریت توکن آماده است. تا ثبت یک برنامه‌ی OAuth واقعی، هیچ داده‌ای نمایش داده نمی‌شود.",
     en: "Interface, data model and token handling are ready. Until a real OAuth application exists, no data is shown.",
   },
 };
 
+const ICONS: Record<string, string> = {
+  WORDPRESS: "globe",
+  CLOUDFLARE: "cloud",
+  SEARCH_CONSOLE: "search",
+  GA4: "pulse",
+  INSTAGRAM: "user",
+  YOUTUBE: "play",
+};
+
+/** Kinds that write to the site; they are set up on the Connect site screen. */
+const SITE_KINDS = new Set(["WORDPRESS", "CLOUDFLARE"]);
+
 export default async function ConnectorsPage() {
-  const { t, locale, session, project } = await pageContext();
+  const { t, locale, session, project, requestedProjectId } = await pageContext();
 
   if (!project) {
     return (
@@ -54,6 +72,8 @@ export default async function ConnectorsPage() {
   const rows = await listConnectors(project.id);
   const canWrite = can(session.role, "connector:write");
   const byKind = new Map(rows.map((r) => [r.kind, r]));
+  const connectHref = withProject("/connect", requestedProjectId);
+  const strings = connectStrings(t);
 
   return (
     <>
@@ -68,108 +88,57 @@ export default async function ConnectorsPage() {
             const row = byKind.get(kind);
             const status = row?.status ?? "NOT_CONNECTED";
             const awaiting = AWAITING_OAUTH_APP.includes(kind);
-            const notes = connectorNotes(locale, row?.scopes as string[] | undefined);
+            const error = status === "ERROR" ? storedErrorText(locale, row?.lastError) : null;
             return (
-              <section className="card" key={kind}>
-                <div className="body">
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 9,
-                        flex: "none",
-                        display: "grid",
-                        placeItems: "center",
-                        background: "var(--surface-3)",
-                        color: "var(--ink-2)",
-                        fontFamily: "var(--f-en)",
-                        fontWeight: 600,
-                        fontSize: 13,
-                      }}
-                    >
-                      {kind.slice(0, 2)}
-                    </span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 500 }}>{connectorLabel(kind)}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
-                        {row?.lastSyncAt ? `${t("last_sync")} · ${relative(row.lastSyncAt, locale)}` : "—"}
-                      </div>
+              <section className="card method" key={kind}>
+                <header>
+                  <span className="mico" aria-hidden="true">
+                    <Icon name={ICONS[kind] ?? "plug"} />
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <h3>{connectorLabel(kind)}</h3>
+                    <div className="small muted">
+                      {row?.lastSyncAt ? `${t("last_sync")} · ${relative(row.lastSyncAt, locale)}` : "—"}
                     </div>
-                    <span className="spacer" />
-                    <Status value={awaiting ? "NOT_CONNECTED" : status} t={t} />
                   </div>
-
-                  <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}>
-                    {locale === "fa" ? DESCRIPTIONS[kind]?.fa : DESCRIPTIONS[kind]?.en}
-                  </div>
-
-                  {row?.lastError && (
+                  <span className="spacer" />
+                  <Status value={awaiting ? "NOT_CONNECTED" : status} t={t} />
+                </header>
+                <div className="body">
+                  <p className="desc">{locale === "fa" ? DESCRIPTIONS[kind]?.fa : DESCRIPTIONS[kind]?.en}</p>
+                  {error && (
                     <Note tone="crit" icon="alert">
-                      {(() => {
-                        // Stored as "<reason>: <English message>" for the logs.
-                        const [reason, ...rest] = row.lastError.split(": ");
-                        return connectorMessage(locale, { ok: false, reason, message: rest.join(": ") });
-                      })()}
+                      <Rich text={error} />
                     </Note>
                   )}
-
-                  {notes.length > 0 && (
-                    <ul className="plain" style={{ marginBottom: 10 }}>
-                      {notes.slice(0, 3).map((n, i) => (
-                        <li key={i}>{n}</li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {kind === "WORDPRESS" && canWrite && (
-                    <WordPressForm
-                      projectId={project.id}
-                      siteUrl={project.baseUrl}
-                      locale={locale}
-                      connected={status === "CONNECTED"}
-                      labels={{
-                        siteUrl: t("site_url"),
-                        username: t("username"),
-                        appPassword: t("app_password"),
-                        test: t("test_connection"),
-                        connect: t("connect"),
-                        manage: t("manage"),
-                      }}
-                    />
-                  )}
-
-                  {kind !== "WORDPRESS" && (
-                    <div style={{ marginTop: 4 }}>
-                      {awaiting ? (
-                        <span className="pill mute">
-                          <Icon name="lock" />
-                          {locale === "fa" ? "در انتظار ثبت OAuth" : "Awaiting OAuth registration"}
-                        </span>
-                      ) : (
-                        <span className="pill mute">
-                          <Icon name="key" />
-                          {locale === "fa"
-                            ? "اتصال از طریق API با اعتبارنامه‌ی گوگل"
-                            : "Connect via the API with a Google credential"}
-                        </span>
-                      )}
+                  {SITE_KINDS.has(kind) || kind === "SEARCH_CONSOLE" ? (
+                    <div className="row">
+                      <Link className="btn ghost" href={kind === "SEARCH_CONSOLE" ? `${connectHref}#search-console` : `${connectHref}#method-${kind}`}>
+                        <Icon name="link" />
+                        {status === "CONNECTED" ? t("manage") : t("connect")} · {t("connect_site")}
+                      </Link>
                     </div>
-                  )}
+                  ) : awaiting ? (
+                    <span className="pill mute">
+                      <Icon name="lock" />
+                      {locale === "fa" ? "در انتظار ثبت برنامه‌ی OAuth" : "Awaiting OAuth registration"}
+                    </span>
+                  ) : status !== "CONNECTED" ? (
+                    <GoogleConnectCard
+                      kind="GA4"
+                      s={strings}
+                      locale={locale}
+                      projectId={project.id}
+                      baseUrl={project.baseUrl}
+                      canWrite={canWrite}
+                      canRun={can(session.role, "scan:run")}
+                    />
+                  ) : null}
                 </div>
               </section>
             );
           })}
         </div>
-
-        <Card title={locale === "fa" ? "افزونه‌ی پل وردپرس" : "WordPress bridge plugin"}>
-          <p style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.8 }}>
-            {locale === "fa"
-              ? "وردپرس در REST API استاندارد خود عنوان سئو، متا دیسکریپشن، canonical و ریدایرکت را قابل نوشتن نمی‌کند. افزونه‌ی همراه این محصول (packages/connectors/wordpress-plugin) همان چند فیلد را باز می‌کند. بدون آن، این محصول ادعا نمی‌کند که نوشته است — آن اصلاح‌ها با پیام «پشتیبانی نمی‌شود» رد می‌شوند."
-              : "WordPress does not make the SEO title, meta description, canonical or redirects writable through its standard REST API. The companion plugin (packages/connectors/wordpress-plugin) opens exactly those fields. Without it this product does not pretend the write succeeded — those fixes fail with an unsupported-field message."}
-          </p>
-        </Card>
       </div>
     </>
   );

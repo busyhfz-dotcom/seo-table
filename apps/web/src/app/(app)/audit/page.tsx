@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { Bar, Card, Empty, Note, Status, Table } from "../../../components/ui";
+import { Bar, Card, Empty, Note, Status, Table, UserText } from "../../../components/ui";
 import { pageContext } from "../../../lib/page";
 import { getRun, issueCountsByUrl, latestRunFor, runPages } from "../../../lib/queries";
 import { dateTime, duration, num, pathOf, relative } from "../../../lib/format";
@@ -55,7 +55,7 @@ export default async function AuditPage({
           right={<ScanButton projectId={project.id} locale={locale} label={t("scan")} activeLabel={t("st_running")} />}
         />
         <div className="view">
-          <Card title={t("audit")} sub={project.name}>
+          <Card title={t("audit")} sub={<UserText>{project.name}</UserText>}>
             <Empty icon="pulse">{t("no_runs_yet")}</Empty>
           </Card>
         </div>
@@ -135,7 +135,9 @@ export default async function AuditPage({
             </dl>
             <span className="spacer" />
             <div style={{ textAlign: "end", fontSize: 12, color: "var(--ink-3)" }}>
-              <div>{project.name}</div>
+              <div>
+                <UserText>{project.name}</UserText>
+              </div>
               <div>{dateTime(run.queuedAt, locale)}</div>
             </div>
           </div>

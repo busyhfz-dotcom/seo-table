@@ -5,6 +5,7 @@ import { DEFAULT_LOCALE, dirOf, isLocale, translator } from "../../lib/i18n";
 import { Note } from "../../components/ui";
 import { safePath } from "../../lib/redirect";
 import { isAppError } from "@seo/core";
+import { LanguageSwitch } from "../../components/shell";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,12 @@ export default async function LoginPage({
     redirect(ok ? next : back("1"));
   }
 
+  // The switch returns to this same sign-in screen, its `next` included.
+  const here = `/login${params.next ? `?next=${encodeURIComponent(safePath(params.next))}` : ""}`;
+
   return (
     <div className="auth" dir={dirOf(locale)}>
+      <LanguageSwitch locale={locale} here={here} label={t("language")} className="solo" />
       <div className="card">
         <div className="body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

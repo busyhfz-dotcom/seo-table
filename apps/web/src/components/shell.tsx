@@ -2,13 +2,19 @@ import { pageContext } from "../lib/page";
 import { userOrgs } from "../lib/auth";
 import { OrgSwitcher } from "./org-switcher";
 import { NavLinks, NavStateProvider, NavSync, type NavCounts, type NavGroup } from "./nav";
-import type { T } from "../lib/i18n";
+import type { Locale, T } from "../lib/i18n";
 
 export type { NavCounts } from "./nav";
 
 const GROUPS: Array<{ group: string; items: Array<{ href: string; key: string; icon: string; count?: keyof NavCounts; orgWide?: boolean }> }> =
   [
-    { group: "nav_setup", items: [{ href: "/onboarding", key: "onboarding", icon: "rocket" }] },
+    {
+      group: "nav_setup",
+      items: [
+        { href: "/onboarding", key: "onboarding", icon: "rocket" },
+        { href: "/connect", key: "connect_site", icon: "link" },
+      ],
+    },
     {
       group: "nav_analyze",
       items: [
@@ -16,6 +22,7 @@ const GROUPS: Array<{ group: string; items: Array<{ href: string; key: string; i
         { href: "/projects", key: "projects", icon: "folder", count: "projects", orgWide: true },
         { href: "/audit", key: "audit", icon: "pulse" },
         { href: "/issues", key: "issues", icon: "alert", count: "issues" },
+        { href: "/browser", key: "browser", icon: "browser" },
       ],
     },
     {
@@ -57,7 +64,7 @@ function groups(t: T): NavGroup[] {
 export async function Shell({ children }: { children: React.ReactNode }) {
   const { t, locale, counts, requestedProjectId } = await pageContext();
   return (
-    <NavStateProvider initial={{ counts, projectId: requestedProjectId }}>
+    <NavStateProvider initial={{ counts, projectId: requestedProjectId }} locale={locale}>
       <div className="shell">
         <aside className="nav">
           <div className="brand">
@@ -78,23 +85,27 @@ export async function Shell({ children }: { children: React.ReactNode }) {
 }
 
 /** Query parameters that name something inside one organization. */
-const ORG_SCOPED_PARAMS = ["project", "run", "issue", "new", "wp"];
+const ORG_SCOPED_PARAMS = ["project", "run", "issue", "new", "wp", "connect"];
 
 export async function TopBar({ title, right }: { title: string; right?: React.ReactNode }) {
   const { t, locale, pathname, search, session, counts, requestedProjectId } = await pageContext();
-  const here = `${pathname}${search}`;
+  // Client navigations fetch the page with an internal `_rsc` cache-buster; it
+  // must not end up in the address the language switch returns to.
+  const hereParams = new URLSearchParams(search);
+  hereParams.delete("_rsc");
+  const here = `${pathname}${[...hereParams.keys()].length ? `?${hereParams.toString()}` : ""}`;
   const orgs = session.via === "session" ? await userOrgs(session.userId) : [];
 
   // After switching organization the old project/run ids mean nothing, so the
   // switch returns to the same screen without them.
-  const orgNextParams = new URLSearchParams(search);
+  const orgNextParams = new URLSearchParams(hereParams);
   for (const p of ORG_SCOPED_PARAMS) orgNextParams.delete(p);
   const orgNext = `${pathname}${[...orgNextParams.keys()].length ? `?${orgNextParams.toString()}` : ""}`;
 
   return (
     <div className="topbar">
       {/* This page's project and counts, for the sidebar the layout rendered. */}
-      <NavSync counts={counts} projectId={requestedProjectId} />
+      <NavSync counts={counts} projectId={requestedProjectId} locale={locale} />
       <div className="crumb">
         {t("product")} <span style={{ opacity: 0.4 }}>/</span> <b>{title}</b>
       </div>
@@ -108,21 +119,30 @@ export async function TopBar({ title, right }: { title: string; right?: React.Re
           label={t("organization")}
         />
       )}
-      {/* Plain anchors: switching language changes <html lang/dir>, which lives
-          in the root layout and only a full document load re-renders. */}
-      <div className="seg langsw" role="group" aria-label={t("language")}>
-        <a href={`/api/locale?set=fa&next=${encodeURIComponent(here)}`} aria-current={locale === "fa"} lang="fa">
-          فارسی
-        </a>
-        <a href={`/api/locale?set=en&next=${encodeURIComponent(here)}`} aria-current={locale === "en"} lang="en">
-          EN
-        </a>
-      </div>
+      <LanguageSwitch locale={locale} here={here} label={t("language")} />
       <form action="/api/auth/logout" method="post">
         <button className="btn ghost sm" type="submit">
           {t("signout")}
         </button>
       </form>
+    </div>
+  );
+}
+
+/**
+ * Plain anchors: switching language changes <html lang/dir> and the sidebar,
+ * which live in layouts only a full document load re-renders — so the whole
+ * screen changes language at once, and the address (query included) is kept.
+ */
+export function LanguageSwitch({ locale, here, label, className }: { locale: Locale; here: string; label: string; className?: string }) {
+  return (
+    <div className={`seg langsw${className ? ` ${className}` : ""}`} role="group" aria-label={label}>
+      <a href={`/api/locale?set=fa&next=${encodeURIComponent(here)}`} aria-current={locale === "fa"} lang="fa">
+        فارسی
+      </a>
+      <a href={`/api/locale?set=en&next=${encodeURIComponent(here)}`} aria-current={locale === "en"} lang="en">
+        EN
+      </a>
     </div>
   );
 }

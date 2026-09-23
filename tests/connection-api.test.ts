@@ -210,7 +210,8 @@ describe("the edge worker", () => {
     try {
       const body = await json(await call(checkRoute.POST, "POST", "/x", { ...p(), body: { kind: "CLOUDFLARE" }, locale: "en" }));
       expect(body).toMatchObject({ status: "ERROR", reason: "missing_permission", detail: { permission: "Account → Workers KV Storage → Edit" } });
-      expect(body.message).toBe("The API token lacks this permission: Account → Workers KV Storage → Edit");
+      // The permission is marked as code (the panel sets it in a code span; Cloudflare's name is never translated).
+      expect(body.message).toBe("The API token lacks this permission: `Account → Workers KV Storage → Edit`");
     } finally {
       cf.tokens.get(FAKE_CF_TOKEN)!.permissions.add("kv");
     }

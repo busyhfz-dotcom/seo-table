@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { Card, Empty, Status, Table } from "../../../components/ui";
+import { Card, Empty, Status, Table, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
 import { listProjects } from "../../../lib/queries";
@@ -45,7 +45,7 @@ export default async function ProjectsPage() {
                 <tr key={p.id}>
                   <td>
                     <Link href={`/?project=${p.id}`} style={{ fontWeight: 500 }}>
-                      {p.name}
+                      <UserText>{p.name}</UserText>
                     </Link>
                     <div className="path" dir="ltr">
                       {p.baseUrl.replace(/^https?:\/\//, "")}

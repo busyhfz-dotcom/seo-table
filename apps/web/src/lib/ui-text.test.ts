@@ -157,6 +157,10 @@ describe("API errors", () => {
       "BLOCKED_ADDRESS",
       "UNSUPPORTED_MEDIA_TYPE",
       "INTERNAL",
+      "BROWSER_UNAVAILABLE",
+      "BROWSER_BUSY",
+      "PAYLOAD_TOO_LARGE",
+      "SERVICE_UNAVAILABLE",
     ]) {
       const fa = apiErrorMessage("fa", { status: 400, code });
       expect(fa, code).not.toMatch(/[A-Za-z]{3,}/);
@@ -165,7 +169,15 @@ describe("API errors", () => {
     expect(apiErrorMessage("fa", { status: 429, code: "RATE_LIMITED", details: { retryAfterSeconds: 12 } })).toMatch(/۱۲/);
     expect(apiErrorMessage("fa", { status: 403, code: "FORBIDDEN", details: { requiresApproval: true } })).toMatch(/تأیید/);
     expect(apiErrorMessage("fa", { status: 404 })).toBe(apiErrorMessage("fa", { status: 404, code: "NOT_FOUND" }));
-    expect(apiErrorMessage("fa", { status: 503, unreadable: true })).toMatch(/۵۰۳/);
+    expect(apiErrorMessage("fa", { status: 599, unreadable: true })).toMatch(/۵۹۹/);
+    expect(apiErrorMessage("fa", { status: 503, unreadable: true })).toMatch(/در دسترس نیست/);
+    expect(apiErrorMessage("en", { status: 409, code: "CONNECTOR_NOT_CONNECTED", details: { kind: "CLOUDFLARE" } })).toMatch(
+      /Cloudflare is not connected/,
+    );
+    // A connector's reason travels in the details and is worded, never shown raw.
+    const conflict = apiErrorMessage("fa", { status: 409, code: "CONFLICT", details: { reason: "invalid_token" } });
+    expect(conflict).toMatch(/توکن/);
+    expect(conflict).not.toMatch(/invalid_token/);
     expect(apiErrorMessage("en", { status: 0, network: true })).toMatch(/reach the server/);
   });
 

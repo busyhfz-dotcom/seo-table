@@ -23,21 +23,44 @@ type NavState = { counts: NavCounts; projectId: string | null };
 export type NavItem = { href: string; label: string; icon: string; count?: keyof NavCounts; orgWide?: boolean };
 export type NavGroup = { label: string; items: NavItem[] };
 
-const Ctx = createContext<{ state: NavState; set: (s: NavState) => void } | null>(null);
+const Ctx = createContext<{ state: NavState; set: (s: NavState) => void; locale: Locale } | null>(null);
 
-export function NavStateProvider({ initial, children }: { initial: NavState; children: ReactNode }) {
+function cookieLocale(): string | null {
+  return document.cookie.match(/(?:^|;\s*)locale=(fa|en)\b/)?.[1] ?? null;
+}
+
+/**
+ * `locale` is the language the layout — the sidebar — was rendered in. A page
+ * whose own render arrives in another language (the language was switched in
+ * another tab, or this document came back from the back/forward cache after a
+ * switch) would leave the sidebar in the old one; the whole document is
+ * reloaded instead, so the screen is never half in each language.
+ */
+export function NavStateProvider({ initial, locale, children }: { initial: NavState; locale: Locale; children: ReactNode }) {
   const [state, set] = useState(initial);
-  return <Ctx.Provider value={{ state, set }}>{children}</Ctx.Provider>;
+  useEffect(() => {
+    const check = (event: PageTransitionEvent) => {
+      const current = cookieLocale();
+      if (event.persisted && current && current !== locale) window.location.reload();
+    };
+    window.addEventListener("pageshow", check);
+    return () => window.removeEventListener("pageshow", check);
+  }, [locale]);
+  return <Ctx.Provider value={{ state, set, locale }}>{children}</Ctx.Provider>;
 }
 
 /** Rendered by every page's TopBar: publishes that page's project and counts. */
-export function NavSync({ counts, projectId }: NavState) {
+export function NavSync({ counts, projectId, locale }: NavState & { locale: Locale }) {
   const ctx = useContext(Ctx);
   const set = ctx?.set;
+  const layoutLocale = ctx?.locale;
   const key = JSON.stringify({ counts, projectId });
   useEffect(() => {
     set?.(JSON.parse(key) as NavState);
   }, [key, set]);
+  useEffect(() => {
+    if (layoutLocale && layoutLocale !== locale) window.location.reload();
+  }, [layoutLocale, locale]);
   return null;
 }
 
@@ -62,7 +85,9 @@ export function NavLinks({ groups, locale, label }: { groups: NavGroup[]; locale
         <div key={group.label} className="navsec">
           <div className="navgroup">{group.label}</div>
           {group.items.map((item) => {
-            const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            // "/connect" must not light up on "/connectors".
+            const isActive =
+              item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
             const count = item.count ? state.counts[item.count] : undefined;
             const href =
               state.projectId && !item.orgWide

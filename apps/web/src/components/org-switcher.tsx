@@ -26,7 +26,7 @@ export function OrgSwitcher({
         onChange={(event) => event.currentTarget.form?.requestSubmit()}
       >
         {orgs.map((o) => (
-          <option key={o.id} value={o.id}>
+          <option key={o.id} value={o.id} translate="no">
             {o.name}
           </option>
         ))}

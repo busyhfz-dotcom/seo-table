@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { Card, Empty, Note, Sev, Table } from "../../../components/ui";
+import { Card, Empty, Note, Sev, Table, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext, withProject } from "../../../lib/page";
 import { listConnectors, listOpportunities } from "../../../lib/queries";
@@ -58,7 +58,7 @@ export default async function ContentPage() {
                 <SyncButton projectId={project.id} locale={locale} label={t("refresh")} busyLabel={t("loading")} />
               ) : null
             ) : (
-              <Link className="btn primary" href={withProject("/connectors", requestedProjectId)}>
+              <Link className="btn primary" href={`${withProject("/connect", requestedProjectId)}#search-console`}>
                 <Icon name="plug" />
                 {t("connect")} Search Console
               </Link>
@@ -85,7 +85,9 @@ export default async function ContentPage() {
               {rows.map((o) => (
                 <tr key={o.id}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{o.query}</div>
+                    <div style={{ fontWeight: 500 }}>
+                      <UserText>{o.query}</UserText>
+                    </div>
                     {o.url && (
                       <div className="path" dir="ltr">
                         {readableUrl(o.url.replace(/^https?:\/\/[^/]+/, ""))}

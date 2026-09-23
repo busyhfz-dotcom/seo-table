@@ -1,12 +1,36 @@
 import type { Metadata, Viewport } from "next";
-import { cookies } from "next/headers";
-import { dirOf, isLocale, DEFAULT_LOCALE } from "../lib/i18n";
+import { cookies, headers } from "next/headers";
+import { dirOf, isLocale, translator, DEFAULT_LOCALE, type MessageKey } from "../lib/i18n";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "SEO Table",
-  description: "SEO audit, fix and approval console",
+/** The tab title names the screen, in the reader's language. */
+const TITLES: Record<string, MessageKey> = {
+  "": "dashboard",
+  login: "signin",
+  onboarding: "onboarding",
+  connect: "connect_site",
+  projects: "projects",
+  audit: "audit",
+  issues: "issues",
+  browser: "browser",
+  fixes: "fixes",
+  approvals: "approvals",
+  content: "content",
+  connectors: "connectors",
+  reports: "reports",
+  settings: "settings",
 };
+
+export async function generateMetadata(): Promise<Metadata> {
+  const cookie = (await cookies()).get("locale")?.value;
+  const t = translator(isLocale(cookie) ? cookie : DEFAULT_LOCALE);
+  const section = ((await headers()).get("x-pathname") ?? "/").split("/")[1] ?? "";
+  const key = TITLES[section] ?? "not_found_title";
+  return {
+    title: `${t(key)} · ${t("product")}`,
+    description: t("meta_description"),
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",

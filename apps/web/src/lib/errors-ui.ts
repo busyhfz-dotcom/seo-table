@@ -7,6 +7,7 @@
  */
 import type { Locale } from "./i18n";
 import { toPersianDigits } from "./format";
+import { reasonText } from "./connector-messages";
 
 type Pair = { fa: string; en: string };
 
@@ -26,12 +27,32 @@ const CODES: Record<string, Pair> = {
   APPROVAL_REQUIRED: { fa: "این اصلاح بدون تأیید انسان اجرا نمی‌شود.", en: "This fix cannot run without human approval." },
   UPSTREAM_ERROR: { fa: "سرویس بیرونی پاسخ درستی نداد.", en: "The external service did not answer properly." },
   CONNECTOR_NOT_CONNECTED: { fa: "اتصال لازم برقرار نیست. ابتدا آن را وصل کن.", en: "The required connector is not connected yet." },
+  BROWSER_UNAVAILABLE: {
+    fa: "مرورگر پنل الان در دسترس نیست. کمی بعد دوباره تلاش کن.",
+    en: "The panel's browser is not available right now. Try again shortly.",
+  },
+  BROWSER_BUSY: {
+    fa: "همه‌ی جایگاه‌های مرورگر پر است. چند دقیقه‌ی دیگر دوباره تلاش کن.",
+    en: "All browser slots are in use. Try again in a few minutes.",
+  },
+  PAYLOAD_TOO_LARGE: { fa: "حجم درخواست بیش از حد مجاز است.", en: "The request is too large." },
+  SERVICE_UNAVAILABLE: {
+    fa: "این سرویس الان در دسترس نیست. کمی بعد دوباره تلاش کن.",
+    en: "This service is not available right now. Try again shortly.",
+  },
   BLOCKED_ADDRESS: {
     fa: "نشانی سایت به یک شبکه‌ی خصوصی یا داخلی اشاره می‌کند و قابل خزش نیست.",
     en: "The site address points to a private or internal network and cannot be crawled.",
   },
   UNSUPPORTED_MEDIA_TYPE: { fa: "قالب درخواست پذیرفته نیست.", en: "The request format is not accepted." },
   INTERNAL: { fa: "خطای داخلی سرور. دوباره تلاش کن.", en: "Internal server error. Try again." },
+};
+
+const NOT_CONNECTED: Record<string, Pair> = {
+  WORDPRESS: { fa: "وردپرس هنوز وصل نیست. اول آن را در صفحه‌ی «اتصال سایت» وصل کن.", en: "WordPress is not connected yet. Connect it on the Connect site screen first." },
+  CLOUDFLARE: { fa: "Cloudflare هنوز وصل نیست. اول آن را در صفحه‌ی «اتصال سایت» وصل کن.", en: "Cloudflare is not connected yet. Connect it on the Connect site screen first." },
+  SEARCH_CONSOLE: { fa: "Search Console هنوز وصل نیست. اول آن را وصل کن.", en: "Search Console is not connected yet. Connect it first." },
+  GA4: { fa: "GA4 هنوز وصل نیست. اول آن را وصل کن.", en: "GA4 is not connected yet. Connect it first." },
 };
 
 /** When a response carries no code (a proxy page, an empty body), its status decides. */
@@ -43,9 +64,12 @@ const STATUS_CODES: Record<number, string> = {
   409: "CONFLICT",
   415: "UNSUPPORTED_MEDIA_TYPE",
   422: "POLICY_VIOLATION",
+  413: "PAYLOAD_TOO_LARGE",
   429: "RATE_LIMITED",
   500: "INTERNAL",
   502: "UPSTREAM_ERROR",
+  503: "SERVICE_UNAVAILABLE",
+  504: "UPSTREAM_ERROR",
 };
 
 const NETWORK: Pair = {
@@ -78,6 +102,14 @@ export function apiErrorMessage(
   const pair = (code && (overrides?.[code] ?? CODES[code])) || null;
   if (!pair) return (failure.unreadable ? UNREADABLE : UNKNOWN)[locale].replace("{n}", n);
   let text = pair[locale];
+  // Which connector is missing, and the connector's own reason (e.g. why the
+  // edge worker could not be removed), say more than the generic sentence.
+  const kind = failure.details?.kind;
+  if (code === "CONNECTOR_NOT_CONNECTED" && typeof kind === "string" && NOT_CONNECTED[kind]) {
+    text = NOT_CONNECTED[kind]![locale];
+  }
+  const reason = reasonText(locale, typeof failure.details?.reason === "string" ? failure.details.reason : null);
+  if (reason) text = `${text} ${reason}`;
   const retry = Number(failure.details?.retryAfterSeconds);
   if (code === "RATE_LIMITED" && Number.isFinite(retry) && retry > 0) {
     const s = locale === "fa" ? toPersianDigits(String(Math.ceil(retry))) : String(Math.ceil(retry));

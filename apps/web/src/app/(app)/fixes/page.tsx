@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { fixTitle, fixWhy, readableUrl, resultCodeLabel, ruleName } from "../../../lib/labels";
 import { Card, Diff, Empty, Note, RiskPill, Status } from "../../../components/ui";
@@ -9,6 +10,11 @@ import { num, pathOf, relative } from "../../../lib/format";
 import { can, policyLimits, requiresApproval } from "@seo/core";
 import type { Locale, T } from "../../../lib/i18n";
 import { FixActions } from "./actions";
+import { FixPreview } from "./preview";
+import { previewable } from "./preview-fields";
+import { connectionOverview } from "@seo/connectors";
+import { withProject } from "../../../lib/page";
+import { connectStrings } from "../connect/keys";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +23,7 @@ type WriteResult = { url: string; field: string; ok: boolean; code?: string; pre
 type DryRun = { at?: string; applied?: number; failed?: number; skipped?: number; results?: WriteResult[] };
 
 export default async function FixesPage() {
-  const { t, locale, session, project } = await pageContext();
+  const { t, locale, session, project, requestedProjectId } = await pageContext();
 
   if (!project) {
     return (
@@ -32,7 +38,17 @@ export default async function FixesPage() {
     );
   }
 
-  const fixes = await listFixes(project.id, ["DRAFT", "APPROVED", "APPLYING", "APPLIED", "FAILED", "ROLLED_BACK"]);
+  const [fixes, overview] = await Promise.all([
+    listFixes(project.id, ["DRAFT", "APPROVED", "APPLYING", "APPLIED", "FAILED", "ROLLED_BACK"]),
+    connectionOverview(project.id),
+  ]);
+  // Where Apply would write, and whether that connection can do each kind of fix.
+  const target = overview.writeTarget.effective;
+  const targetMethod = overview.methods.find((m) => m.kind === target);
+  const writable = targetMethod?.status === "connected";
+  const supported = new Set<string>(writable ? (targetMethod?.capabilities?.supportedActions ?? []) : []);
+  const strings = connectStrings(t);
+  const connectHref = withProject("/connect", requestedProjectId);
   const executions = await latestLiveExecutions(fixes.map((f) => f.id));
   const limits = policyLimits();
   const perms = {
@@ -133,7 +149,49 @@ export default async function FixesPage() {
                       />
                     )}
 
-                    <div style={{ marginTop: 14 }}>
+                    <div className="via" style={{ marginTop: 12 }}>
+                      <Icon name={writable ? (target === "CLOUDFLARE" ? "cloud" : "globe") : "box"} />
+                      {writable ? (
+                        <>
+                          <span>
+                            {t("fx_via")}: <b style={{ color: "var(--ink-2)", fontWeight: 500 }}>{t(`tg_${target}`)}</b>
+                          </span>
+                          {supported.has(fix.action) ? (
+                            <span className="pill ok">
+                              <Icon name="check" />
+                              {t("fx_supported")}
+                            </span>
+                          ) : (
+                            <>
+                              <span className="pill warn">
+                                <Icon name="alert" />
+                                {t("fx_unsupported")}
+                              </span>
+                              <Link href={connectHref} className="lnk">
+                                {t("connect_site")}
+                              </Link>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <span>{t("fx_no_target")}</span>
+                          <Link href={connectHref} className="lnk">
+                            {t("connect_site")}
+                          </Link>
+                          <span>·</span>
+                          <Link href={`${connectHref}#method-FIX_PACK`} className="lnk">
+                            {t("fx_manual")}
+                          </Link>
+                        </>
+                      )}
+                    </div>
+
+                    <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      {previewable(changes) && (
+                        <FixPreview changes={changes} projectId={project.id} locale={locale} s={strings} />
+                      )}
+                      <div style={{ flex: "1 1 auto" }}>
                       <FixActions
                         id={fix.id}
                         status={fix.status}
@@ -157,6 +215,7 @@ export default async function FixesPage() {
                           rollbackPartial: t("rollback_partial"),
                         }}
                       />
+                      </div>
                     </div>
 
                     <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--ink-3)" }}>

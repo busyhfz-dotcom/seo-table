@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { Card, Empty, Note, RiskPill, Table } from "../../../components/ui";
+import { Card, Empty, Note, RiskPill, Table, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
 import { getOrg, listAuditLog, orgMembers } from "../../../lib/queries";
@@ -63,7 +63,7 @@ export default async function SettingsPage({
           <Card title={t("s_general")}>
             <dl className="kv">
               <dt>{locale === "fa" ? "سازمان" : "Organization"}</dt>
-              <dd>{org?.name ?? "—"}</dd>
+              <dd>{org?.name ? <UserText>{org.name}</UserText> : "—"}</dd>
               <dt>{locale === "fa" ? "کاربر" : "Signed in as"}</dt>
               <dd className="path" dir="ltr">
                 {session.email}
@@ -76,7 +76,7 @@ export default async function SettingsPage({
               <dd>
                 {project ? (
                   <>
-                    {project.name} ·{" "}
+                    <UserText>{project.name}</UserText> ·{" "}
                     <span className="path" dir="ltr">
                       {project.baseUrl}
                     </span>
@@ -86,7 +86,7 @@ export default async function SettingsPage({
                 )}
               </dd>
               <dt>{locale === "fa" ? "زبان رابط" : "Interface language"}</dt>
-              <dd>{locale === "fa" ? "فارسی (RTL)" : "English (LTR)"}</dd>
+              <dd>{locale === "fa" ? "فارسی (راست‌به‌چپ)" : "English (left to right)"}</dd>
               {project && (
                 <>
                   <dt>{t("page_cap")}</dt>
@@ -146,7 +146,7 @@ export default async function SettingsPage({
                     <td className="path" dir="ltr">
                       {m.email}
                     </td>
-                    <td>{m.name ?? "—"}</td>
+                    <td>{m.name ? <UserText>{m.name}</UserText> : "—"}</td>
                     <td>
                       <span className={`pill ${m.role === "OWNER" ? "acc" : "mute"}`}>{roleLabel(m.role, locale)}</span>
                     </td>
@@ -169,7 +169,7 @@ export default async function SettingsPage({
                 <dd className="num">{num(policy.limits.maxChangesPerExecution, locale)}</dd>
                 <dt>{locale === "fa" ? "اجرای آزمایشی اجباری" : "Dry run required first"}</dt>
                 <dd>{policy.limits.requireDryRunFirst ? yes(locale) : no(locale)}</dd>
-                <dt>{locale === "fa" ? "snapshot قبل از نوشتن" : "Snapshot before writing"}</dt>
+                <dt>{locale === "fa" ? "نسخه‌ی پشتیبان پیش از نوشتن" : "Snapshot before writing"}</dt>
                 <dd>{policy.limits.requireSnapshot ? yes(locale) : no(locale)}</dd>
                 <dt>{locale === "fa" ? "بازگردانی" : "Rollback"}</dt>
                 <dd>{policy.limits.allowRollback ? yes(locale) : no(locale)}</dd>
@@ -227,7 +227,7 @@ export default async function SettingsPage({
               </div>
               <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 12, lineHeight: 1.8 }}>
                 {locale === "fa"
-                  ? "این سه اقدام در سه لایه‌ی مستقل مسدود شده‌اند: سیاست در کد، بررسی در مسیر API، و یک trigger در دیتابیس که انتقال به وضعیت اعمال‌شده را بدون رکورد تأیید رد می‌کند."
+                  ? "این سه اقدام در سه لایه‌ی مستقل مسدود شده‌اند: سیاست در کد، بررسی در مسیر API، و یک تریگر در پایگاه داده که انتقال به وضعیت اعمال‌شده را بدون رکورد تأیید رد می‌کند."
                   : "These three are blocked in three independent layers: the policy in code, the check in the API route, and a database trigger that refuses the transition to an applied state without an approval row."}
               </p>
             </Card>

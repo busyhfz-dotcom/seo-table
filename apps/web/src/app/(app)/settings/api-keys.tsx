@@ -161,7 +161,7 @@ export function ApiKeys({ locale, labels }: { locale: Locale; labels: Labels }) 
             <tbody>
               {keys.map((k) => (
                 <tr key={k.id} style={k.revokedAt ? { opacity: 0.6 } : undefined}>
-                  <td>{k.name}</td>
+                  <td translate="no">{k.name}</td>
                   <td className="path" dir="ltr">
                     {k.masked}
                   </td>

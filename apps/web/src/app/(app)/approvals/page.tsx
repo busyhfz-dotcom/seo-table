@@ -1,6 +1,6 @@
 import { TopBar } from "../../../components/shell";
 import { actionLabel, fixTitle, fixWhy, roleLabel, ruleTitle } from "../../../lib/labels";
-import { Card, Diff, Empty, Note, RiskPill } from "../../../components/ui";
+import { Card, Diff, Empty, Note, RiskPill, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
 import { listApprovalQueue } from "../../../lib/queries";
@@ -103,7 +103,7 @@ export default async function ApprovalsPage() {
                         {(() => {
                           const by = approval?.requestedBy;
                           const person = by ? requesters.get(by) : undefined;
-                          if (person) return person.name ?? person.email;
+                          if (person) return <UserText>{person.name ?? person.email}</UserText>;
                           return t("agent");
                         })()}
                       </span>

@@ -94,6 +94,24 @@ const PATHS: Record<string, ReactElement> = {
       <path d="M11 12l9-9M17 3h4v4" />
     </>
   ),
+  cloud: <path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 9.1 4.5 4.5 0 0 0 7 18z" />,
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z" />
+    </>
+  ),
+  external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
+  puzzle: (
+    <path d="M10 4a2 2 0 1 1 4 0v2h4v4h-2a2 2 0 1 0 0 4h2v4h-4v-2a2 2 0 1 0-4 0v2H6v-4h2a2 2 0 1 0 0-4H6V6h4z" />
+  ),
+  browser: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M7 6.5h.01M10 6.5h.01" />
+    </>
+  ),
+  refresh: <path d="M20 11a8 8 0 0 0-14.8-4M4 5v4h4M4 13a8 8 0 0 0 14.8 4M20 19v-4h-4" />,
 };
 
 export type IconName = keyof typeof PATHS | string;
@@ -101,7 +119,20 @@ export type IconName = keyof typeof PATHS | string;
 export function Icon({ name, className }: { name: IconName; className?: string }) {
   const path = PATHS[name] ?? PATHS.info;
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className}>
+    // Presentation attributes are only defaults: any stylesheet rule for the
+    // context (a button, a pill) wins, and an icon nobody styled stays icon-sized.
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      width={16}
+      height={16}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       {path}
     </svg>
   );

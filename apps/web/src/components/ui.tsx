@@ -193,7 +193,7 @@ export function Diff({ before, after }: { before: string | null; after: string |
   const line = (value: string | null) => {
     const text = readableUrl(value) ?? "∅";
     return (
-      <span dir="auto" className={looksLikeUrl(text) ? "url" : undefined}>
+      <span dir="auto" translate="no" className={looksLikeUrl(text) ? "url" : undefined}>
         {text}
       </span>
     );
@@ -249,5 +249,50 @@ export function Table({
         <tbody>{children}</tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * Text that comes from the customer or their site (a project name, a crawled
+ * title, a search query): shown as written, in its own direction, and marked
+ * translate="no" so neither a translator nor the language audit treats it as
+ * interface text.
+ */
+export function UserText({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span translate="no" dir="auto" className={className}>
+      {children}
+    </span>
+  );
+}
+
+/**
+ * A sentence with `code` spans (a line to paste into .htaccess, a setting's
+ * exact name): the backticked parts are set as left-to-right code.
+ */
+export function Rich({ text }: { text: string }) {
+  const parts = text.split(/`([^`]+)`/);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <code key={i} dir="ltr" className="inline-code">
+            {part}
+          </code>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
+/** A translated template with {name} slots filled by elements (links, code, user text). */
+export function Fill({ template, slots }: { template: string; slots: Record<string, ReactNode> }) {
+  const parts = template.split(/\{(\w+)\}/);
+  return (
+    <>
+      {parts.map((part, i) => (i % 2 === 1 ? <span key={i}>{slots[part] ?? `{${part}}`}</span> : part))}
+    </>
   );
 }

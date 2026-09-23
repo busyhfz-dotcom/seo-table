@@ -1,6 +1,6 @@
 import { TopBar } from "../../../components/shell";
 import { categoryLabel, ruleTitle } from "../../../lib/labels";
-import { Card, Empty, Note, Sev, Status, Table } from "../../../components/ui";
+import { Card, Empty, Note, Sev, Status, Table, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
 import { dashboard, listIssues } from "../../../lib/queries";
@@ -51,7 +51,7 @@ export default async function ReportsPage() {
       <div className="view">
         <Note icon="info">{t("reports_note")}</Note>
 
-        <Card title={locale === "fa" ? "خلاصه وضعیت" : "Status summary"} sub={project.name}>
+        <Card title={locale === "fa" ? "خلاصه وضعیت" : "Status summary"} sub={<UserText>{project.name}</UserText>}>
           {!run ? (
             <Empty>{t("no_runs_yet")}</Empty>
           ) : (
