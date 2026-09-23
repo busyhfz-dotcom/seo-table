@@ -41,6 +41,7 @@ import {
   type CrawlResult,
   type ScoreBreakdown,
 } from "@seo/core";
+import { PLATFORM_MAX_AGE_MS, refreshPlatform } from "@seo/connectors";
 
 type ProposalDraft = ReturnType<typeof proposalService.draftsFromGroups>[number];
 
@@ -289,6 +290,15 @@ async function analyzeRun(
     .where(and(eq(auditRuns.id, runId), eq(auditRuns.status, "RUNNING")));
 
   await db.update(projects).set({ score: breakdown.score }).where(eq(projects.id, project.id));
+
+  // Keep the platform (CMS, SEO plugin, CDN) current: it decides which ways of
+  // connecting the panel recommends. Best effort — never a reason to fail a scan.
+  const detectedAt = project.platform?.detectedAt ? Date.parse(project.platform.detectedAt) : 0;
+  if (!(Date.now() - detectedAt < PLATFORM_MAX_AGE_MS)) {
+    await refreshPlatform(project.id).catch((err: unknown) =>
+      log.warn({ err: (err as Error).message }, "platform detection failed"),
+    );
+  }
 
   metric("run.succeeded");
   metric("run.score", breakdown.score);

@@ -9,6 +9,12 @@
  * Concurrency: a live apply first moves the proposal to APPLYING with a
  * conditional UPDATE, so of two simultaneous applies exactly one writes; a
  * rollback claims the execution the same way.
+ *
+ * Where writes go: the project's write target (see resolveWriteTarget) picks
+ * the connector for an apply, and the execution row records it. A rollback
+ * always goes back through the connector the execution used, whatever the
+ * project's target is by then — an edge override is not undone by writing to
+ * WordPress.
  */
 import {
   and,
@@ -35,7 +41,13 @@ import {
   Conflict,
   type Actor,
 } from "@seo/core";
-import { forProject, type Connector, type WriteRequest, type WriteResult } from "@seo/connectors";
+import {
+  forProject,
+  resolveWriteTarget,
+  type Connector,
+  type WriteRequest,
+  type WriteResult,
+} from "@seo/connectors";
 
 type Change = { url: string; field: string; before: string | null; after: string; selector?: string };
 
@@ -52,6 +64,13 @@ export type SnapshotEntry = {
   previous: string | null;
   /** What was (or was about to be) written. */
   applied: string | null;
+  /**
+   * For a connector that layers an override over the site (the Cloudflare
+   * edge): the override before the write, null when there was none. Rollback
+   * writes this back instead of `previous`, so it removes the override rather
+   * than pinning a copy of the old text. Absent for other connectors.
+   */
+  restore?: string | null;
   state: "pending" | "written" | "failed";
 };
 
@@ -137,7 +156,8 @@ export async function execute(input: ExecuteInput): Promise<ExecuteOutcome> {
   const skipped = changes.length - batch.length;
 
   // Before the claim, so a missing connector cannot leave the proposal APPLYING.
-  const connector = await forProject(proposal.projectId, "WORDPRESS");
+  const target = await resolveWriteTarget(proposal.projectId);
+  const connector = await forProject(proposal.projectId, target.kind);
   const capabilities = await connector.capabilities();
 
   if (!input.dryRun) {
@@ -166,6 +186,7 @@ export async function execute(input: ExecuteInput): Promise<ExecuteOutcome> {
           fixProposalId: proposal.id,
           dryRun: input.dryRun,
           status: "APPLYING",
+          connectorKind: target.kind,
           appliedCount: 0,
           failedCount: 0,
         })
@@ -201,7 +222,7 @@ export async function execute(input: ExecuteInput): Promise<ExecuteOutcome> {
           ...base,
           ok: false,
           code: "unsupported_action",
-          error: `The connected site cannot perform ${proposal.action}. ${capabilities.notes.join(" ")}`,
+          error: `${target.kind} cannot perform ${proposal.action} on this site. ${capabilities.notes.join(" ")}`,
         });
         continue;
       }
@@ -241,11 +262,27 @@ export async function execute(input: ExecuteInput): Promise<ExecuteOutcome> {
         continue;
       }
 
+      let restore: string | null | undefined;
+      if (connector.readStored) {
+        const stored = await readCurrent(connector, req, connector.readStored);
+        if (!stored.ok) {
+          results.push({
+            ...base,
+            ok: false,
+            code: "unreadable",
+            error: `The current value could not be read, so nothing was written: ${stored.error}`,
+          });
+          continue;
+        }
+        restore = stored.value;
+      }
+
       const entry: SnapshotEntry = {
         ...base,
         ...(change.selector ? { selector: change.selector } : {}),
         previous,
         applied: change.after,
+        ...(restore !== undefined ? { restore } : {}),
         state: "pending",
       };
       snapshot.push(entry);
@@ -309,6 +346,7 @@ export async function execute(input: ExecuteInput): Promise<ExecuteOutcome> {
     metadata: {
       action: proposal.action,
       risk: proposal.risk,
+      connector: target.kind,
       applied,
       failed,
       skipped,
@@ -350,7 +388,8 @@ export async function rollback(input: { executionId: string; actor: Actor }): Pr
   )[0];
   if (!project) throw new NotFound("Project not found");
 
-  const connector = await forProject(proposal.projectId, "WORDPRESS");
+  // The connector that made the writes; rows from before 0006 were all WordPress.
+  const connector = await forProject(proposal.projectId, execution.connectorKind ?? "WORDPRESS");
 
   // Claim the execution, then the proposal, so neither a second rollback nor a
   // concurrent re-apply can interleave with this one.
@@ -414,8 +453,9 @@ export async function rollback(input: { executionId: string; actor: Actor }): Pr
         });
         continue;
       }
+      const after = entry.restore !== undefined ? entry.restore : entry.previous;
       const res: WriteResult = connector.write
-        ? await connector.write({ ...req, before: current.value, after: entry.previous })
+        ? await connector.write({ ...req, before: current.value, after, intent: "restore" })
         : { ...base, ok: false, code: "not_writable", error: "Connector cannot write" };
       results.push(res);
     }
@@ -471,6 +511,7 @@ export async function rollback(input: { executionId: string; actor: Actor }): Pr
     targetId: execution.id,
     metadata: {
       proposalId: proposal.id,
+      connector: execution.connectorKind ?? "WORDPRESS",
       restored,
       of: snapshot.length,
       complete,
@@ -501,10 +542,11 @@ async function currentStatus(proposalId: string): Promise<FixStatus | null> {
 async function readCurrent(
   connector: Connector,
   req: Pick<WriteRequest, "url" | "field" | "selector">,
+  reader = connector.read,
 ): Promise<{ ok: true; value: string | null } | { ok: false; error: string }> {
-  if (!connector.read) return { ok: false, error: "this connector cannot read values back" };
+  if (!reader) return { ok: false, error: "this connector cannot read values back" };
   try {
-    return { ok: true, value: await connector.read(req) };
+    return { ok: true, value: await reader(req) };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }

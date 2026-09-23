@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@seo/browser": "workspace:*",
     "@seo/connectors": "workspace:*",
     "@seo/core": "workspace:*",
     "@seo/db": "workspace:*",

@@ -73,9 +73,11 @@ OWNER_EMAIL=… OWNER_PASSWORD=… ./scripts/deploy-railway.sh
    `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
    (or `openssl rand -hex 32`). Leading/trailing whitespace is ignored.
 
-   web only: `SERVICE_ROLE=web`, `PORT=3000`, and for the first boot
-   `OWNER_EMAIL`, `OWNER_PASSWORD`.
-   worker only: `SERVICE_ROLE=worker`.
+   web only: `SERVICE_ROLE=web`, `PORT=3000`,
+   `WORKER_INTERNAL_URL` = `http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3001`
+   (the in-panel browser, below), and for the first boot `OWNER_EMAIL`,
+   `OWNER_PASSWORD`.
+   worker only: `SERVICE_ROLE=worker`, `PORT=3001`.
 
 4. web → Settings → Networking → Generate Domain (port 3000). Then set
    `APP_URL` on web to that `https://…` address. `APP_URL` is optional and only
@@ -127,6 +129,51 @@ the same values in each service's Settings.
 
 Readiness answers within about 3 seconds even when PostgreSQL or Redis is
 unreachable (503 with the failing check marked `false`), so a probe never hangs.
+
+## The in-panel browser
+
+The **Browser** screen (`/browser`) and its Inspect panel run a real Chromium on
+the **worker**. The web service only proxies to it:
+
+```
+browser ──/api/browser/*──▶ web (session, role, rate limits)
+                              └─ http://<worker private domain>:3001/internal/browser/*
+                                 header x-internal-token = HMAC-SHA256(SESSION_SECRET, "seo-table-internal-browser")
+                                 └─ worker: one Chromium, one incognito context per session
+```
+
+- **Wiring.** The worker listens on `PORT=3001` on `::` (Railway's private
+  network is IPv6), and web finds it through
+  `WORKER_INTERNAL_URL=http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3001`. Both are
+  set by `deploy-railway.sh`. The token needs no new secret: it is derived from
+  `SESSION_SECRET`, which must be the same on both services (if it differs the
+  browser answers "not available" and the web log says why). The worker needs
+  no public domain.
+- **Image.** The Dockerfile installs Chromium's headless shell and its system
+  libraries (`playwright-core install --with-deps --only-shell chromium`, into
+  `/ms-playwright`) for the Playwright version in `PLAYWRIGHT_VERSION`, and the
+  build fails if that differs from the `playwright-core` in
+  `packages/browser/package.json`. Change both together.
+- **Memory.** Chromium starts on the first use and exits after two idle minutes.
+  Budget about 150 MB for Chromium itself plus 100–300 MB per open session or
+  running render. With the defaults (3 sessions, 2 renders) give the worker
+  **at least 1.5 GB**, 2 GB to be comfortable; 1 GB is enough with
+  `BROWSER_MAX_SESSIONS=1`. `BROWSER_MAX_SESSIONS=0` turns the browser off (the
+  screen then says it is unavailable).
+- **Limits** (worker variables): `BROWSER_MAX_SESSIONS` (3),
+  `BROWSER_MAX_SESSIONS_PER_ORG` (2), `BROWSER_MAX_RENDERS` (2 at once),
+  `BROWSER_IDLE_TIMEOUT_MS` (5 minutes without a frame or an input),
+  `BROWSER_MAX_SESSION_MS` (30 minutes, hard). A person has one session;
+  opening another replaces it. Web adds per-person rate limits (6 new sessions
+  and 10 renders a minute). `BROWSER_EXECUTABLE_PATH` points at a system
+  Chromium instead of the bundled one.
+- **Safety.** Every request the remote page makes is checked by the same SSRF
+  rule as the crawler, twice: when the page makes it, and again in a local
+  forward proxy that is Chromium's only way out and connects only to the
+  address it checked (so DNS rebinding and WebSockets are covered). Contexts
+  are incognito, with downloads, service workers and permissions off, file
+  choosers and dialogs swallowed, and only safe keys forwarded. The screen tells
+  people the browser runs on the server and that what they type passes through it.
 
 ## Custom domain and TLS
 

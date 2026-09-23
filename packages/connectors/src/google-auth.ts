@@ -84,7 +84,11 @@ export async function accessToken(creds: GoogleCredentials, scopes: string[]): P
 
   if (res.status >= 400 || !res.data?.access_token) {
     throw new ConnectorError(
-      res.data?.error === "invalid_grant" ? "invalid_credentials" : "token_exchange_failed",
+      res.data?.error === "invalid_grant"
+        ? "invalid_credentials"
+        : res.data?.error === "invalid_scope"
+          ? "insufficient_scope"
+          : "token_exchange_failed",
       res.data?.error_description ?? `Google returned HTTP ${res.status} when exchanging credentials`,
     );
   }
@@ -118,5 +122,11 @@ export function forgetTokens(): void {
 
 export const SCOPES = {
   searchConsole: ["https://www.googleapis.com/auth/webmasters.readonly"],
+  /**
+   * Submitting a sitemap is a write: it needs the full webmasters scope, and
+   * the account must be an Owner or Full user of the property. URL Inspection
+   * only reads and works with the read-only scope.
+   */
+  searchConsoleWrite: ["https://www.googleapis.com/auth/webmasters"],
   analytics: ["https://www.googleapis.com/auth/analytics.readonly"],
 } as const;

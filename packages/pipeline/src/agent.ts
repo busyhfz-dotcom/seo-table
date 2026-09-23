@@ -26,7 +26,7 @@ import {
   recordAudit,
   ALWAYS_APPROVAL,
 } from "@seo/core";
-import { forProjectOrNull, type ConnectorCapabilities } from "@seo/connectors";
+import { forProjectOrNull, resolveWriteTarget, type ConnectorCapabilities } from "@seo/connectors";
 import { execute } from "./execute.js";
 
 export type AgentReport = {
@@ -61,7 +61,8 @@ export async function runAgent(projectId: string): Promise<AgentReport> {
     );
   report.considered = candidates.length;
 
-  const connector = await forProjectOrNull(projectId, "WORDPRESS");
+  // The same connector execute() will write through.
+  const connector = await forProjectOrNull(projectId, (await resolveWriteTarget(projectId)).kind);
   let capabilities: ConnectorCapabilities | null = null;
   let connectorError: string | null = null;
   if (connector) {

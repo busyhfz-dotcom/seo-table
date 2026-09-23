@@ -16,6 +16,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -93,6 +94,7 @@ export const connectorKindEnum = pgEnum("connector_kind", [
   "GA4",
   "INSTAGRAM",
   "YOUTUBE",
+  "CLOUDFLARE",
 ]);
 export const connectorStatusEnum = pgEnum("connector_status", [
   "NOT_CONNECTED",
@@ -186,9 +188,19 @@ export const projects = pgTable(
     pageCap: integer("page_cap").notNull().default(2000),
     crawlRate: integer("crawl_rate").notNull().default(8),
     score: integer("score"),
+    /**
+     * Where fixes are written: 'WORDPRESS' | 'CLOUDFLARE'. NULL means automatic —
+     * Cloudflare's edge when that connector is connected, otherwise WordPress.
+     */
+    writeTarget: text("write_target").$type<WriteTarget>(),
+    /** Last platform detection (CMS, SEO plugin, CDN); null until first detected. */
+    platform: jsonb("platform").$type<PlatformInfo>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("projects_org_idx").on(t.orgId)],
+  (t) => [
+    index("projects_org_idx").on(t.orgId),
+    check("projects_write_target_ck", sql`${t.writeTarget} IS NULL OR ${t.writeTarget} IN ('WORDPRESS', 'CLOUDFLARE')`),
+  ],
 );
 
 // ---------------------------------------------------------------- audit runs
@@ -391,6 +403,12 @@ export const fixExecutions = pgTable(
     status: fixStatusEnum("status").notNull(),
     appliedCount: integer("applied_count").notNull().default(0),
     failedCount: integer("failed_count").notNull().default(0),
+    /**
+     * The connector the writes went through. Rollback must use the same one: an
+     * edge override is not undone by writing to WordPress. NULL on rows written
+     * before 0006, which were all WordPress.
+     */
+    connectorKind: connectorKindEnum("connector_kind"),
     snapshot: jsonb("snapshot"),
     results: jsonb("results"),
     error: text("error"),
@@ -526,3 +544,32 @@ export type ActorType = (typeof actorTypeEnum.enumValues)[number];
 export type RiskLevel = (typeof riskEnum.enumValues)[number];
 export type FixAction = (typeof fixActionEnum.enumValues)[number];
 export type Role = (typeof roleEnum.enumValues)[number];
+
+/** The connectors that can apply fixes; see `projects.write_target`. */
+export type WriteTarget = Extract<ConnectorKind, "WORDPRESS" | "CLOUDFLARE">;
+
+/** What `detectPlatform` found for a project's site, stored in `projects.platform`. */
+export type PlatformInfo = {
+  cms:
+    | "wordpress"
+    | "shopify"
+    | "wix"
+    | "squarespace"
+    | "webflow"
+    | "joomla"
+    | "drupal"
+    | "magento"
+    | "nextjs"
+    | "nuxt"
+    | "custom";
+  cmsVersion: string | null;
+  seoPlugin: "yoast" | "rankmath" | "aioseo" | "seopress" | null;
+  /** "cloudflare", "arvancloud", "fastly", "cloudfront", "akamai", "vercel", "netlify", or null. */
+  cdn: string | null;
+  /** The Server header, as sent. */
+  server: string | null;
+  /** WordPress REST namespaces, when /wp-json/ answered; drives which plugin APIs are usable. */
+  wpNamespaces?: string[];
+  /** ISO timestamp. */
+  detectedAt: string;
+};

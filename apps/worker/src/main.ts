@@ -28,7 +28,9 @@ import {
   type FixJobData,
 } from "@seo/core";
 import { closeDb, pingDb, pool } from "@seo/db";
+import { BrowserManager } from "@seo/browser";
 import { analyze, execute, isPermanentFailure, markRunFailed, runAgent } from "@seo/pipeline";
+import { browserApi } from "./browser-api.js";
 
 process.env.SERVICE_NAME ??= "seo-worker";
 
@@ -37,6 +39,8 @@ let shuttingDown = false;
 let auditWorker: Worker<AuditJobData> | undefined;
 let fixWorker: Worker<FixJobData> | undefined;
 let reaperTimer: NodeJS.Timeout | undefined;
+/** Created on the first browser request; Chromium itself starts only when a session or render needs it. */
+let browserManager: BrowserManager | undefined;
 
 /** Readiness answers within this, whatever state Postgres and Redis are in. */
 const PROBE_TIMEOUT_MS = 2_500;
@@ -62,7 +66,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 // schema; /api/ready stays 503 until the workers run.
 // Railway injects PORT for every service; the worker binds its health server to it.
 const port = env().PORT ?? 3001;
+const handleBrowser = browserApi({
+  manager: () =>
+    (browserManager ??= new BrowserManager({
+      maxSessions: env().BROWSER_MAX_SESSIONS,
+      maxSessionsPerOrg: env().BROWSER_MAX_SESSIONS_PER_ORG,
+      maxRenders: env().BROWSER_MAX_RENDERS,
+      idleMs: env().BROWSER_IDLE_TIMEOUT_MS,
+      maxSessionMs: env().BROWSER_MAX_SESSION_MS,
+      executablePath: env().BROWSER_EXECUTABLE_PATH,
+    })),
+  sessionSecret: env().SESSION_SECRET,
+  draining: () => shuttingDown,
+});
 const server = createServer(async (req, res) => {
+  if (await handleBrowser(req, res)) return;
   if (req.url === "/health" || req.url === "/api/health") {
     res.writeHead(shuttingDown ? 503 : 200, { "content-type": "application/json" });
     res.end(JSON.stringify({ status: shuttingDown ? "draining" : "ok", service: "worker" }));
@@ -91,7 +109,18 @@ const server = createServer(async (req, res) => {
   }
   res.writeHead(404).end();
 });
-server.listen(port, () => log.info({ port }, "worker health server listening"));
+// "::" because Railway's private network (how web reaches /internal/browser) is
+// IPv6; on a host without IPv6 it falls back to every IPv4 interface.
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EAFNOSUPPORT" && err.syscall === "listen") {
+    server.listen(port, "0.0.0.0");
+    return;
+  }
+  log.error({ err: err.message }, "worker HTTP server error");
+  process.exit(1);
+});
+server.on("listening", () => log.info({ address: server.address() }, "worker HTTP server listening"));
+server.listen(port, "::");
 
 // ---- graceful shutdown -----------------------------------------------------
 async function closeWorkers(): Promise<void> {
@@ -121,7 +150,9 @@ async function shutdown(signal: string): Promise<void> {
   try {
     clearInterval(reaperTimer);
     server.close();
-    await closeWorkers();
+    // Browser sessions end with the process; closing Chromium properly frees its
+    // temp profiles instead of leaving them to the container.
+    await Promise.all([closeWorkers(), browserManager?.close()]);
     await closeQueues();
     await closeRedis();
     await closeDb();

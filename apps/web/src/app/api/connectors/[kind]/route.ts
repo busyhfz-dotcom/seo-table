@@ -2,8 +2,15 @@ import { connectorMessage, connectorNotes, storedConnectorError } from "../../..
 import { DEFAULT_LOCALE, isLocale } from "../../../../lib/i18n";
 import { z } from "zod";
 import { and, connectors, db, eq, type ConnectorKind } from "@seo/db";
-import { NotFound, BadRequest, assertPublicUrl, recordAudit, seal } from "@seo/core";
-import { build, AWAITING_OAUTH_APP, CONNECTOR_KINDS } from "@seo/connectors";
+import { NotFound, BadRequest, Conflict, assertPublicUrl, recordAudit, seal } from "@seo/core";
+import {
+  build,
+  edgeForProject,
+  AWAITING_OAUTH_APP,
+  CONNECTOR_KINDS,
+  ConnectorError,
+  type CloudflareCredentials,
+} from "@seo/connectors";
 import { handler } from "../../../../lib/route";
 import { defaultProject, getProject } from "../../../../lib/queries";
 
@@ -63,7 +70,21 @@ const ga4 = z.object({
   google: googleCreds,
 });
 
-const schema = z.discriminatedUnion("kind", [wordpress, searchConsole, ga4]);
+/**
+ * A Cloudflare API token (never the Global API Key). The site it acts on is the
+ * project's own address, taken from the project — never from the request.
+ */
+const cloudflareSchema = z.object({
+  kind: z.literal("CLOUDFLARE"),
+  apiToken: z
+    .string()
+    .trim()
+    .min(20)
+    .max(200)
+    .regex(/^[A-Za-z0-9_-]+$/, { message: "must be a Cloudflare API token" }),
+});
+
+const schema = z.discriminatedUnion("kind", [wordpress, searchConsole, ga4, cloudflareSchema]);
 
 /**
  * Connect a connector.
@@ -89,7 +110,9 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
 
   // Verify first. A connector is never stored as CONNECTED on the strength of a
   // well-formed form submission.
-  const { kind: _kind, ...credentials } = body;
+  const { kind: _kind, ...fields } = body;
+  const credentials =
+    body.kind === "CLOUDFLARE" ? ({ apiToken: body.apiToken, siteUrl: project.baseUrl } satisfies CloudflareCredentials) : fields;
   // The site URL is the one thing here that makes the server connect somewhere
   // the customer chose: refuse internal addresses before any request is made.
   if (body.kind === "WORDPRESS") await assertPublicUrl(body.siteUrl);
@@ -98,6 +121,8 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
 
   const sealed = result.ok ? seal(JSON.stringify(credentials)) : null;
   const scopes = result.capabilities?.notes ?? [];
+  // What the connection overview shows without calling the site again. No secrets.
+  const config = { capabilities: result.capabilities ?? null, detail: result.detail ?? null, checkedAt: new Date().toISOString() };
 
   await db
     .insert(connectors)
@@ -109,6 +134,7 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
       secretIv: sealed?.iv ?? null,
       secretTag: sealed?.tag ?? null,
       scopes,
+      config,
       lastSyncAt: result.ok ? new Date() : null,
       lastError: result.ok ? null : storedConnectorError(result),
     })
@@ -120,6 +146,7 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
         secretIv: sealed?.iv ?? null,
         secretTag: sealed?.tag ?? null,
         scopes,
+        config,
         lastSyncAt: result.ok ? new Date() : null,
         lastError: result.ok ? null : storedConnectorError(result),
         updatedAt: new Date(),
@@ -146,10 +173,19 @@ export const POST = handler({ permission: "connector:write", schema }, async ({ 
     capabilities: result.capabilities
       ? { ...result.capabilities, notes: connectorNotes(locale, result.capabilities.notes) }
       : null,
+    // Cloudflare: {zone, hosts, installed, outdated, conflicts}, or {permission} when one is missing.
+    detail: result.detail ?? null,
   };
 });
 
-/** Disconnect: the sealed credential is removed, the row stays for its history. */
+/**
+ * Disconnect: the sealed credential is removed, the row stays for its history.
+ *
+ * Cloudflare first removes the edge worker's routes and script: once the token
+ * is gone the panel could never remove them, and the worker would keep
+ * serving rules nobody can see here. If that fails, nothing is disconnected —
+ * unless `?keepEdge=1` says to leave the worker running on purpose.
+ */
 export const DELETE = handler({ permission: "connector:write" }, async ({ req, session, params, actor }) => {
   const kind = kindParam(params.kind);
   const requested = req.nextUrl.searchParams.get("projectId");
@@ -157,6 +193,26 @@ export const DELETE = handler({ permission: "connector:write" }, async ({ req, s
     ? await getProject(session.orgId, requested)
     : await defaultProject(session.orgId);
   if (!project) throw new NotFound("No project");
+
+  if (kind === "CLOUDFLARE" && req.nextUrl.searchParams.get("keepEdge") !== "1") {
+    const row = (await db.select().from(connectors).where(and(eq(connectors.projectId, project.id), eq(connectors.kind, kind))).limit(1))[0];
+    if (row?.status === "CONNECTED") {
+      try {
+        const removed = await (await edgeForProject(project.id)).uninstall();
+        await recordAudit({
+          orgId: session.orgId,
+          actor,
+          action: "connector.uninstall_edge",
+          targetType: "connector",
+          targetId: `${project.id}:${kind}`,
+          metadata: { ok: true, routes: removed.removedRoutes, scriptDeleted: removed.scriptDeleted, via: "disconnect" },
+        });
+      } catch (err) {
+        const reason = err instanceof ConnectorError ? err.code : "network_error";
+        throw new Conflict("The edge worker could not be removed from Cloudflare, so the connection was kept.", { reason });
+      }
+    }
+  }
 
   await db
     .update(connectors)

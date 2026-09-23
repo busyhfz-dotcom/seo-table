@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, projects, connectors } from "@seo/db";
 import { assertPublicUrl, recordAudit } from "@seo/core";
+import { refreshPlatform } from "@seo/connectors";
 import { handler } from "../../../lib/route";
 import { listProjects } from "../../../lib/queries";
 
@@ -44,13 +45,18 @@ export const POST = handler(
     await db
       .insert(connectors)
       .values(
-        (["WORDPRESS", "SEARCH_CONSOLE", "GA4", "INSTAGRAM", "YOUTUBE"] as const).map((kind) => ({
+        (["WORDPRESS", "CLOUDFLARE", "SEARCH_CONSOLE", "GA4", "INSTAGRAM", "YOUTUBE"] as const).map((kind) => ({
           projectId: project.id,
           kind,
           status: "NOT_CONNECTED" as const,
         })),
       )
       .onConflictDoNothing();
+
+    // Detecting the CMS/CDN decides which connection methods the panel
+    // recommends. Best effort and not awaited: a slow site must not delay the
+    // response, and the first scan detects it anyway.
+    void refreshPlatform(project.id).catch(() => undefined);
 
     await recordAudit({
       orgId: session.orgId,

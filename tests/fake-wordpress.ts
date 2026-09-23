@@ -9,6 +9,12 @@
  * `bridge` toggles the SEO Table bridge plugin's namespace, which is what decides
  * whether SEO fields and redirects are writable. Like the real plugin, the bridge
  * keys redirects by decoded path and deletes a field written as null.
+ *
+ * `seoPlugin` adds that plugin's namespace and REST routes with the request
+ * shapes (and hazards) of the real one, and `frontEnd` serves each post's
+ * rendered page — title, description, canonical and robots as the plugin, the
+ * excerpt (`excerptAsDescription`) or WordPress defaults would print them — so
+ * writes that are verified on the live page can be tested end to end.
  */
 import { createServer, type IncomingMessage, type Server } from "node:http";
 
@@ -28,7 +34,10 @@ export type FakePost = {
   restBase: "pages" | "posts" | "products";
   title: string;
   content: string;
+  excerpt?: string;
 };
+
+export type FakeSeoPlugin = "rankmath" | "seopress" | "aioseo" | "yoast";
 
 export type FakeWp = {
   baseUrl: string;
@@ -38,6 +47,8 @@ export type FakeWp = {
   /** Bridge redirects, keyed by decoded path ("/legacy"). */
   redirects: Map<string, string>;
   writes: Array<{ method: string; path: string; body: unknown }>;
+  /** What the SEO plugin stores per post, in the plugin's own keys. */
+  plugin: Map<number, Record<string, unknown>>;
   /** Knobs a test turns while the server runs. */
   knobs: {
     /** Make every bridge SEO read fail with HTTP 500. */
@@ -46,6 +57,8 @@ export type FakeWp = {
     writeDelayMs: number;
     /** Make the bridge resolve a path to a different post id (a misbehaving resolver). */
     misresolve: Map<string, number>;
+    /** The plugin accepts writes but the theme prints its own title (the write never shows). */
+    themeOverridesTitle: boolean;
   };
   close: () => Promise<void>;
 };
@@ -66,7 +79,15 @@ export const FAKE_WP_CREDENTIALS = { username: USER, applicationPassword: PASS }
 export type FakeWpMode = "normal" | "blockUsers" | "stripAuth" | "waf" | "subscriber" | "moved";
 
 export async function startFakeWordPress(
-  opts: { bridge?: boolean; bridgeVersion?: string; mode?: FakeWpMode; frontPageId?: number } = {},
+  opts: {
+    bridge?: boolean;
+    bridgeVersion?: string;
+    mode?: FakeWpMode;
+    frontPageId?: number;
+    seoPlugin?: FakeSeoPlugin;
+    frontEnd?: boolean;
+    excerptAsDescription?: boolean;
+  } = {},
 ): Promise<FakeWp> {
   const mode = opts.mode ?? "normal";
   let baseUrl = "";
@@ -74,7 +95,9 @@ export async function startFakeWordPress(
   const seo = new Map<number, Record<string, string | null>>();
   const redirects = new Map<string, string>();
   const writes: FakeWp["writes"] = [];
-  const knobs: FakeWp["knobs"] = { failSeoReads: false, writeDelayMs: 0, misresolve: new Map() };
+  const knobs: FakeWp["knobs"] = { failSeoReads: false, writeDelayMs: 0, misresolve: new Map(), themeOverridesTitle: false };
+  const plugin = new Map<number, Record<string, unknown>>();
+  const pluginNamespaces: Record<FakeSeoPlugin, string> = { rankmath: "rankmath/v1", seopress: "seopress/v1", aioseo: "aioseo/v1", yoast: "yoast/v1" };
 
   const posts: FakePost[] = [
     { id: 11, slug: "1204", path: "/p/1204/", restBase: "pages", title: "کتانی ۱۲۰۴", content: "<p>کتانی</p>" },
@@ -84,7 +107,7 @@ export async function startFakeWordPress(
     { id: 14, slug: "team", path: "/about/team/", restBase: "pages", title: "About the team", content: "" },
     { id: 15, slug: "team", path: "/careers/team/", restBase: "pages", title: "Join the team", content: "" },
     { id: 16, slug: "home", path: "/", restBase: "pages", title: "Home", content: "" },
-    { id: 21, slug: "hello", path: "/2024/hello/", restBase: "posts", title: "Hello", content: "" },
+    { id: 21, slug: "hello", path: "/2024/hello/", restBase: "posts", title: "Hello", content: "", excerpt: "A short hello from the blog." },
     { id: 22, slug: "کفش-دویدن", path: "/2024/کفش-دویدن/", restBase: "posts", title: "کفش", content: "" },
     { id: 31, slug: "shoe", path: "/product/shoe/", restBase: "products", title: "Shoe", content: "" },
     {
@@ -108,7 +131,50 @@ export async function startFakeWordPress(
     link: link(p),
     title: { raw: p.title, rendered: p.title },
     content: { raw: p.content, rendered: p.content },
+    excerpt: { raw: p.excerpt ?? "", rendered: p.excerpt ?? "" },
   });
+
+  // ---- what the front end prints, per plugin -------------------------------
+  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const AIOSEO_TITLE_FORMAT = "#post_title #separator_sa #site_title";
+  function head(p: FakePost): { title: string; description: string | null; canonical: string; robots: string } {
+    const meta = plugin.get(p.id) ?? {};
+    const siteTitle = `${p.title} - Fake WP`;
+    const fromExcerpt = opts.excerptAsDescription && p.excerpt ? p.excerpt : null;
+    const flags = (noindex: boolean, nofollow: boolean) => `${noindex ? "noindex" : "index"}, ${nofollow ? "nofollow" : "follow"}`;
+    switch (opts.seoPlugin) {
+      case "rankmath": {
+        const robots = Array.isArray(meta.rank_math_robots) && meta.rank_math_robots.length ? (meta.rank_math_robots as string[]).join(", ") : "index, follow";
+        return {
+          title: String(meta.rank_math_title ?? "%title% %sep% %sitename%").replace("%title%", p.title).replace("%sep%", "-").replace("%sitename%", "Fake WP"),
+          description: (meta.rank_math_description as string) ?? fromExcerpt,
+          canonical: (meta.rank_math_canonical_url as string) ?? link(p),
+          robots: `${robots}, max-snippet:-1, max-image-preview:large`,
+        };
+      }
+      case "seopress":
+        return {
+          title: (meta._seopress_titles_title as string) || siteTitle,
+          description: (meta._seopress_titles_desc as string) || fromExcerpt,
+          canonical: (meta._seopress_robots_canonical as string) || link(p),
+          robots: flags(meta._seopress_robots_index === "yes", meta._seopress_robots_follow === "yes"),
+        };
+      case "aioseo":
+        return {
+          title: meta.title && meta.title !== AIOSEO_TITLE_FORMAT ? String(meta.title) : siteTitle,
+          description: (meta.description as string) || fromExcerpt,
+          canonical: (meta.canonical_url as string) || link(p),
+          robots: meta.robots_default === false ? flags(Boolean(meta.robots_noindex), Boolean(meta.robots_nofollow)) : "index, follow",
+        };
+      default:
+        return { title: siteTitle, description: fromExcerpt, canonical: link(p), robots: "index, follow" };
+    }
+  }
+  function renderPage(p: FakePost): string {
+    const h = head(p);
+    const title = knobs.themeOverridesTitle ? `${p.title} | Theme` : h.title;
+    return `<!doctype html><html><head><title>${esc(title)}</title>${h.description ? `<meta name="description" content="${esc(h.description)}">` : ""}<link rel="canonical" href="${esc(h.canonical)}"><meta name="robots" content="${esc(h.robots)}"></head><body>${p.content}</body></html>`;
+  }
 
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -129,8 +195,24 @@ export async function startFakeWordPress(
       }
       return send(200, {
         name: "Fake WP",
-        namespaces: ["wp/v2", "oembed/1.0", ...(opts.bridge ? ["seo-table/v1"] : [])],
+        namespaces: [
+          "wp/v2",
+          "oembed/1.0",
+          ...(opts.bridge ? ["seo-table/v1"] : []),
+          ...(opts.seoPlugin ? [pluginNamespaces[opts.seoPlugin]] : []),
+        ],
       });
+    }
+
+    // The public site: rendered pages, no login needed.
+    if (opts.frontEnd && method === "GET" && !url.pathname.startsWith("/wp-json")) {
+      const page = posts.find((p) => decodedPath(link(p)) === decodedPath(url.toString()));
+      if (!page) {
+        res.writeHead(404, { "content-type": "text/html" });
+        return res.end("<html><head><title>Not found</title></head></html>");
+      }
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      return res.end(renderPage(page));
     }
 
     if (mode === "waf") {
@@ -182,10 +264,11 @@ export async function startFakeWordPress(
       const post = posts.find((p) => p.id === Number(single[2]) && p.restBase === single[1]);
       if (!post) return send(404, { code: "rest_post_invalid_id" });
       if (method === "POST") {
-        const body = (await json(req)) as { title?: string; content?: string };
+        const body = (await json(req)) as { title?: string; content?: string; excerpt?: string };
         await recordWrite(body);
         if (typeof body.title === "string") post.title = body.title;
         if (typeof body.content === "string") post.content = body.content;
+        if (typeof body.excerpt === "string") post.excerpt = body.excerpt;
       }
       return send(200, postJson(post));
     }
@@ -204,6 +287,91 @@ export async function startFakeWordPress(
       await recordWrite(body);
       if (typeof body.alt_text === "string") item.alt_text = body.alt_text;
       return send(200, item);
+    }
+
+    // ---- SEO plugins' own REST APIs -------------------------------------------
+    const pluginRoute = opts.seoPlugin ? url.pathname.slice(`/wp-json/${pluginNamespaces[opts.seoPlugin]}`.length) : "";
+    if (opts.seoPlugin === "rankmath" && url.pathname.startsWith("/wp-json/rankmath/v1/")) {
+      if (pluginRoute === "/updateMeta" && method === "POST") {
+        const body = (await json(req)) as { objectID: number; objectType: string; meta: Record<string, unknown> };
+        await recordWrite(body);
+        if (!posts.some((p) => p.id === body.objectID)) return send(404, { code: "rest_post_invalid_id" });
+        const meta = plugin.get(body.objectID) ?? {};
+        for (const [k, v] of Object.entries(body.meta)) {
+          if (v === "" || v === null || (Array.isArray(v) && v.length === 0)) delete meta[k];
+          else meta[k] = v;
+        }
+        plugin.set(body.objectID, meta);
+        return send(200, { slug: true, schemas: [] });
+      }
+    }
+    if (opts.seoPlugin === "seopress" && url.pathname.startsWith("/wp-json/seopress/v1/posts/")) {
+      const m = pluginRoute.match(/^\/posts\/(\d+)(\/[a-z-]+)?$/);
+      const id = Number(m?.[1]);
+      if (!m || !posts.some((p) => p.id === id)) return send(404, { code: "rest_post_invalid_id" });
+      const meta = plugin.get(id) ?? {};
+      if (!m[2] && method === "GET") return send(200, meta);
+      if (method === "PUT" && (m[2] === "/title-description-metas" || m[2] === "/meta-robot-settings")) {
+        const body = (await json(req)) as Record<string, string>;
+        await recordWrite(body);
+        // Like SEOPress: every field of the route is replaced, sent or not.
+        const keys =
+          m[2] === "/title-description-metas"
+            ? { title: "_seopress_titles_title", description: "_seopress_titles_desc" }
+            : Object.fromEntries(
+                ["_seopress_robots_index", "_seopress_robots_follow", "_seopress_robots_archive", "_seopress_robots_snippet", "_seopress_robots_imageindex", "_seopress_robots_canonical", "_seopress_robots_primary_cat", "_seopress_robots_breadcrumbs"].map((k) => [k, k]),
+              );
+        for (const [param, key] of Object.entries(keys)) meta[key] = body[param] ?? "";
+        plugin.set(id, meta);
+        return send(200, { code: "success" });
+      }
+    }
+    if (opts.seoPlugin === "aioseo" && url.pathname.startsWith("/wp-json/aioseo/v1/post")) {
+      const TEXT = ["title", "description", "keywords", "og_title", "og_description", "og_article_section", "og_article_tags", "twitter_title", "twitter_description"];
+      if (method === "GET") {
+        const id = Number(url.searchParams.get("postId"));
+        const meta = plugin.get(id) ?? {};
+        return send(200, {
+          success: true,
+          data: {
+            currentPost: {
+              id,
+              title: meta.title || AIOSEO_TITLE_FORMAT,
+              description: meta.description || "#post_excerpt",
+              keywords: meta.keywords ?? [],
+              og_title: meta.og_title ?? null,
+              og_description: meta.og_description ?? null,
+              og_article_section: meta.og_article_section ?? "",
+              og_article_tags: meta.og_article_tags ?? [],
+              twitter_title: meta.twitter_title ?? null,
+              twitter_description: meta.twitter_description ?? null,
+              canonicalUrl: meta.canonical_url ?? null,
+              default: meta.robots_default !== false,
+              noindex: Boolean(meta.robots_noindex),
+              nofollow: Boolean(meta.robots_nofollow),
+            },
+          },
+        });
+      }
+      if (method === "POST") {
+        const body = (await json(req)) as Record<string, unknown>;
+        await recordWrite(body);
+        const id = Number(body.id);
+        const meta = plugin.get(id) ?? {};
+        // Like updatePosts(): these are nulled whenever they are not sent.
+        for (const k of TEXT) {
+          const v = body[k];
+          meta[k] = v === undefined || v === "" || (Array.isArray(v) && v.length === 0) ? null : v;
+        }
+        if (meta.title === AIOSEO_TITLE_FORMAT) meta.title = null;
+        if (meta.description === "#post_excerpt") meta.description = null;
+        if ("canonicalUrl" in body) meta.canonical_url = body.canonicalUrl || null;
+        for (const flag of ["default", "noindex", "nofollow"]) {
+          if (flag in body) meta[flag === "default" ? "robots_default" : `robots_${flag}`] = Boolean(body[flag]);
+        }
+        plugin.set(id, meta);
+        return send(200, { success: true, posts: id });
+      }
     }
 
     // ---- the bridge plugin ---------------------------------------------------
@@ -314,6 +482,7 @@ export async function startFakeWordPress(
     seo,
     redirects,
     writes,
+    plugin,
     knobs,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };

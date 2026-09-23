@@ -16,6 +16,8 @@
 #                          of creating a Railway Postgres service
 #   SEED_SITE              first project's site URL (you can also add it in the UI)
 #   CUSTOM_DOMAIN          e.g. app.example.ir — prints the DNS record to create
+#   BROWSER_MAX_SESSIONS   in-panel browser sessions on the worker (default 3,
+#                          0 turns the browser off); see docs/DEPLOY.md for memory
 #
 # Safe to re-run: existing services and variables are reused, secrets are only
 # generated the first time (never replaced), and migrations are idempotent.
@@ -176,10 +178,15 @@ COMMON=(
 say "Variables"
 # Pin the web port so the public domain and the app always agree
 # (the Dockerfile EXPOSEs 3000; Railway would otherwise inject its own PORT).
+# The worker's port is pinned too: web reaches its internal browser API over
+# Railway's private network at worker.RAILWAY_PRIVATE_DOMAIN:3001 (contract K3).
+# shellcheck disable=SC2016  # a Railway reference, resolved by Railway, not the shell
 set_vars web    "${COMMON[@]}" --set "SERVICE_ROLE=web" --set "PORT=3000" --set "APP_URL=$BASE_URL" \
                 --set "OWNER_EMAIL=$OWNER_EMAIL" --set "OWNER_PASSWORD=$OWNER_PASSWORD" \
-                --set "SEED_SITE=${SEED_SITE:-}"
-set_vars worker "${COMMON[@]}" --set "SERVICE_ROLE=worker" --set "WORKER_CONCURRENCY=2"
+                --set "SEED_SITE=${SEED_SITE:-}" \
+                --set 'WORKER_INTERNAL_URL=http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3001'
+set_vars worker "${COMMON[@]}" --set "SERVICE_ROLE=worker" --set "WORKER_CONCURRENCY=2" --set "PORT=3001" \
+                --set "BROWSER_MAX_SESSIONS=${BROWSER_MAX_SESSIONS:-3}"
 
 # ---------------------------------------------------------------- deploy
 # The web container runs migrations before it starts serving (scripts/start.sh), so

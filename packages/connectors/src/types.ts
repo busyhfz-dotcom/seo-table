@@ -26,6 +26,12 @@ export type WriteRequest = {
   /** null removes the value (deletes the meta key, the redirect, clears the alt text). */
   after: string | null;
   selector?: string;
+  /**
+   * "restore" when a rollback writes back a recorded value. A connector whose
+   * store holds templates or overrides may then prefer clearing its own value
+   * when that reproduces the recorded one, instead of pinning the old text.
+   */
+  intent?: "apply" | "restore";
 };
 
 export type WriteResult = {
@@ -57,6 +63,13 @@ export type Connector = {
    * cannot be read, so "unknown" is never mistaken for "empty".
    */
   read?: (req: Pick<WriteRequest, "url" | "field" | "selector">) => Promise<string | null>;
+  /**
+   * For connectors that layer an override over the site's own value (the
+   * Cloudflare edge): the override alone, null when the site's value shows.
+   * read() reports what visitors get; this reports what rollback must write
+   * back so the override — not a copy of the old text — is what gets undone.
+   */
+  readStored?: (req: Pick<WriteRequest, "url" | "field" | "selector">) => Promise<string | null>;
 };
 
 export class ConnectorError extends Error {

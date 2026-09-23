@@ -8,6 +8,7 @@
  */
 import type { Locale } from "./i18n";
 import { toPersianDigits } from "./format";
+import { CONNECTOR_RESULT_CODES } from "./connector-messages";
 
 type Pair = { fa: string; en: string };
 
@@ -280,7 +281,7 @@ export function resultCodeLabel(code: string | undefined, ok: boolean, locale: L
   }
   const http = code.match(/^http_(\d+)$/);
   if (http) return locale === "fa" ? `سایت خطای HTTP ${toPersianDigits(http[1]!)} داد` : `The site answered HTTP ${http[1]}`;
-  return pick(RESULT_CODES, code, locale) ?? code;
+  return pick(RESULT_CODES, code, locale) ?? CONNECTOR_RESULT_CODES[code]?.[locale] ?? code;
 }
 
 /** Search Console opportunity buckets. The table stores the English sentence. */
@@ -329,6 +330,7 @@ export function roleLabel(role: string, locale: Locale): string {
 
 export const CONNECTOR_LABELS: Record<string, string> = {
   WORDPRESS: "WordPress",
+  CLOUDFLARE: "Cloudflare",
   SEARCH_CONSOLE: "Search Console",
   GA4: "GA4",
   INSTAGRAM: "Instagram",

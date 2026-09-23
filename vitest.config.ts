@@ -10,6 +10,7 @@ export default defineConfig({
       "@seo/core": path.resolve(root, "packages/core/src/index.ts"),
       "@seo/connectors": path.resolve(root, "packages/connectors/src/index.ts"),
       "@seo/pipeline": path.resolve(root, "packages/pipeline/src/index.ts"),
+      "@seo/browser": path.resolve(root, "packages/browser/src/index.ts"),
     },
   },
   test: {

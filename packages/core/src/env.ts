@@ -51,6 +51,28 @@ const schema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
 
   PORT: z.coerce.number().int().min(1).max(65535).optional(),
+
+  /**
+   * The in-panel browser (worker). Each session is a Chromium context, roughly
+   * 100–300 MB; 0 turns the browser off. A person has at most one session.
+   */
+  BROWSER_MAX_SESSIONS: z.coerce.number().int().min(0).max(20).default(3),
+  BROWSER_MAX_SESSIONS_PER_ORG: z.coerce.number().int().min(1).max(20).default(2),
+  /** Concurrent one-shot renders (the Inspect panel, fix previews). */
+  BROWSER_MAX_RENDERS: z.coerce.number().int().min(1).max(10).default(2),
+  BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(3_600_000).default(300_000),
+  BROWSER_MAX_SESSION_MS: z.coerce.number().int().min(60_000).max(4 * 3_600_000).default(1_800_000),
+  /** A system Chromium instead of the one Playwright installed (PLAYWRIGHT_BROWSERS_PATH). */
+  BROWSER_EXECUTABLE_PATH: z.string().optional(),
+  /**
+   * Where web reaches the worker's internal API (Railway: http://<worker private
+   * domain>:3001). A reference that rendered with an empty host (the worker
+   * service not created yet) counts as unset, like APP_URL above.
+   */
+  WORKER_INTERNAL_URL: z.preprocess(
+    (v) => (typeof v === "string" && /^https?:\/\/(:\d+)?\/?$/i.test(v) ? undefined : v),
+    z.string().url().default("http://127.0.0.1:3001"),
+  ),
 });
 
 export type Env = z.infer<typeof schema>;

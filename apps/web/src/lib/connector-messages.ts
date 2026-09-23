@@ -1,4 +1,4 @@
-import type { Locale } from "./i18n";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "./i18n";
 
 /**
  * Connector results in the viewer's language.
@@ -77,6 +77,119 @@ const REASONS: Record<string, Record<Locale, string>> = {
     fa: "وردپرس پاسخ غیرمنتظره‌ای داد.",
     en: "WordPress returned an unexpected response.",
   },
+
+  // ---- Cloudflare edge
+  invalid_token: {
+    fa: "Cloudflare این توکن API را نپذیرفت (نادرست، منقضی یا لغوشده). در داشبورد Cloudflare به «My Profile ← API Tokens» بروید، توکن تازه‌ای با دسترسی‌های گفته‌شده بسازید و همان را اینجا وارد کنید. کلید Global API Key کار نمی‌کند.",
+    en: "Cloudflare rejected this API token (wrong, expired or revoked). In the Cloudflare dashboard go to My Profile → API Tokens, create a new token with the listed permissions and paste it here. The Global API Key does not work.",
+  },
+  missing_permission: {
+    fa: "توکن API این دسترسی را ندارد:",
+    en: "The API token lacks this permission:",
+  },
+  zone_not_found: {
+    fa: "دامنه‌ی این سایت در حساب Cloudflare که این توکن به آن دسترسی دارد پیدا نشد. سایت را به Cloudflare اضافه کنید یا دسترسی توکن را به zone این دامنه بدهید.",
+    en: "This site's domain is not a zone this token can see in Cloudflare. Add the site to Cloudflare, or give the token access to the domain's zone.",
+  },
+  zone_not_active: {
+    fa: "این دامنه در Cloudflare هنوز فعال نیست؛ نیم‌سرورهای (nameserver) دامنه باید به Cloudflare اشاره کنند.",
+    en: "The domain is not active in Cloudflare yet: its nameservers must point to Cloudflare.",
+  },
+  not_proxied: {
+    fa: "ترافیک این نشانی از Cloudflare عبور نمی‌کند (ابر خاکستری، DNS only). در بخش DNS داشبورد Cloudflare، پراکسی (ابر نارنجی) را برای رکورد این نشانی روشن کنید.",
+    en: "This address's traffic does not pass through Cloudflare (grey cloud, DNS only). In the Cloudflare DNS settings, turn on the proxy (orange cloud) for its record.",
+  },
+  dns_record_missing: {
+    fa: "برای این نشانی هیچ رکورد A، AAAA یا CNAME در DNS کلادفلر نیست.",
+    en: "There is no A, AAAA or CNAME record for this address in Cloudflare DNS.",
+  },
+  route_conflict: {
+    fa: "Worker دیگری از قبل روی این نشانی در Cloudflare فعال است. ابتدا route آن را در «Workers Routes» حذف یا جابه‌جا کنید؛ هیچ تغییری اعمال نشد.",
+    en: "Another Worker already runs on this address in Cloudflare. Remove or move its route under Workers Routes first; nothing was changed.",
+  },
+  edge_not_installed: {
+    fa: "Worker لبه (edge) هنوز برای این سایت نصب نشده است.",
+    en: "The edge worker is not installed for this site yet.",
+  },
+  bypass_failed: {
+    fa: "Worker لبه هنوز در حال به‌روزرسانی است و مقدار اصلی سایت خوانده نشد. یک دقیقه دیگر دوباره امتحان کنید.",
+    en: "The edge worker is still updating, so the site's own value could not be read. Try again in a minute.",
+  },
+  cloudflare_error: {
+    fa: "Cloudflare خطای غیرمنتظره‌ای داد.",
+    en: "Cloudflare returned an unexpected error.",
+  },
+
+  // ---- platform detection and live pages
+  site_unreachable: {
+    fa: "سایت باز نشد. نشانی سایت را بررسی کنید و مطمئن شوید از اینترنت در دسترس است.",
+    en: "The site could not be loaded. Check the address and that it is reachable from the internet.",
+  },
+  too_many_redirects: {
+    fa: "سایت بیش از حد ریدایرکت می‌کند.",
+    en: "The site redirects too many times.",
+  },
+
+  // ---- Search Console actions
+  insufficient_scope: {
+    fa: "اتصال گوگل برای این کار مجوز کافی ندارد. برای ثبت نقشه‌ی سایت، اتصال Search Console را با دسترسی کامل (webmasters، نه فقط‌خواندنی) دوباره برقرار کنید.",
+    en: "The Google connection lacks the scope for this. To submit sitemaps, reconnect Search Console with full access (webmasters, not read-only).",
+  },
+  insufficient_permission: {
+    fa: "این حساب گوگل در Search Console نقش Owner یا Full ندارد؛ ثبت نقشه‌ی سایت به یکی از این دو نقش نیاز دارد.",
+    en: "This Google account is not an Owner or Full user of the Search Console property; submitting sitemaps needs one of those roles.",
+  },
+  quota_exceeded: {
+    fa: "سهمیه‌ی روزانه‌ی گوگل برای این property تمام شده است (بازرسی نشانی: ۲۰۰۰ در روز). فردا دوباره امتحان کنید.",
+    en: "Google's daily quota for this property is used up (URL inspection: 2,000 a day). Try again tomorrow.",
+  },
+  sitemap_outside_property: {
+    fa: "این نقشه‌ی سایت داخل property متصل در Search Console نیست.",
+    en: "This sitemap is not inside the connected Search Console property.",
+  },
+  url_outside_property: {
+    fa: "این نشانی داخل property متصل در Search Console نیست.",
+    en: "This address is not inside the connected Search Console property.",
+  },
+  token_exchange_failed: {
+    fa: "گوگل اطلاعات ورود را نپذیرفت. اتصال Search Console را دوباره برقرار کنید.",
+    en: "Google did not accept the credentials. Reconnect Search Console.",
+  },
+};
+
+/**
+ * Per-change result codes the connectors added for Cloudflare and for
+ * WordPress SEO-plugin writes, for the fixes screen's result list (merge into
+ * RESULT_CODES in labels.ts).
+ */
+export const CONNECTOR_RESULT_CODES: Record<string, Record<Locale, string>> = {
+  not_visible_on_page: {
+    fa: "پس از نوشتن، تغییر روی صفحه دیده نشد (قالب، افزونه‌ی دیگر یا کش آن را می‌پوشاند)؛ تغییر برگردانده شد",
+    en: "The change did not show on the page after writing (a theme, another plugin or a cache overrides it); it was undone",
+  },
+  collateral_change: {
+    fa: "نوشتن این فیلد فیلد دیگری را هم تغییر داد؛ تغییر برگردانده شد",
+    en: "Writing this field also changed another one; it was undone",
+  },
+  description_not_from_excerpt: {
+    fa: "توضیحات متای این صفحه از «چکیده» نمی‌آید، پس تغییر چکیده اثری ندارد",
+    en: "This page's meta description does not come from its excerpt, so changing the excerpt would not change it",
+  },
+  redirect_loop: { fa: "این ریدایرکت حلقه می‌سازد؛ چیزی نوشته نشد", en: "This redirect would loop; nothing was written" },
+  invalid_value: { fa: "مقدار پیشنهادی معتبر نیست؛ چیزی نوشته نشد", en: "The proposed value is not valid; nothing was written" },
+  edge_not_installed: { fa: "Worker لبه در Cloudflare نصب نیست", en: "The edge worker is not installed in Cloudflare" },
+  bypass_failed: { fa: "Worker لبه هنوز به‌روز نشده؛ یک دقیقه دیگر دوباره امتحان کنید", en: "The edge worker is still updating; try again in a minute" },
+  cloudflare_error: { fa: "Cloudflare خطا داد", en: "Cloudflare returned an error" },
+  manifest_conflict: { fa: "فهرست قوانین لبه هم‌زمان تغییر کرد؛ دوباره امتحان کنید", en: "The edge rule index changed at the same time; try again" },
+  corrupt_rule: { fa: "قانون ذخیره‌شده در Cloudflare خراب است", en: "The rule stored in Cloudflare is corrupt" },
+  missing_permission: { fa: "توکن Cloudflare دسترسی لازم را ندارد", en: "The Cloudflare token lacks a required permission" },
+  invalid_token: { fa: "توکن Cloudflare دیگر معتبر نیست", en: "The Cloudflare token is no longer valid" },
+  page_unreachable: { fa: "صفحه برای خواندن مقدار فعلی باز نشد", en: "The page could not be loaded to read its current value" },
+  page_unavailable: { fa: "صفحه با خطا پاسخ داد و مقدار فعلی خوانده نشد", en: "The page answered with an error, so its current value was not read" },
+  page_redirects: { fa: "این صفحه اکنون ریدایرکت می‌شود", en: "This page now redirects" },
+  image_not_found: { fa: "این تصویر دیگر روی صفحه نیست", en: "This image is no longer on the page" },
+  blocked_address: { fa: "نشانی به شبکه‌ی داخلی اشاره می‌کند و مجاز نیست", en: "The address points to a private network and is refused" },
+  response_too_large: { fa: "پاسخ صفحه بیش از حد بزرگ بود", en: "The page's response was too large" },
 };
 
 const NOTES: Array<[RegExp, Record<Locale, string>]> = [
@@ -104,6 +217,106 @@ const NOTES: Array<[RegExp, Record<Locale, string>]> = [
     fa: "افزونه‌ی ریدایرکت پیدا نشد؛ اصلاح‌های ریدایرکت روی این سایت اجرا نمی‌شوند.",
     en: "No redirect plugin found, so redirect fixes cannot be executed on this site.",
   }],
+  [/^SEO Table bridge plugin \S+ detected/, {
+    fa: "افزونه‌ی SEO Table Bridge پیدا شد: عنوان سئو، توضیحات متا، canonical، robots و ریدایرکت‌ها قابل ویرایش‌اند.",
+    en: "SEO Table bridge plugin detected: SEO title, meta description, canonical, robots and redirects are writable.",
+  }],
+  [/^The SEO Table bridge plugin on this site is outdated/, {
+    fa: "نسخه‌ی افزونه‌ی SEO Table Bridge این سایت قدیمی است؛ برای ویرایش فیلدهای سئو و ریدایرکت‌ها آن را به ۰٫۵٫۰ یا بالاتر به‌روز کنید.",
+    en: "The SEO Table bridge plugin on this site is outdated; update it to 0.5.0 or later to enable SEO fields and redirects.",
+  }],
+  [/^(Rank Math|SEOPress|All in One SEO) detected: SEO title/, {
+    fa: "افزونه‌ی سئوی سایت پیدا شد: عنوان سئو، توضیحات متا، canonical و robots از راه API خود همین افزونه نوشته می‌شوند و هر تغییر روی صفحه‌ی زنده بررسی می‌شود؛ چیزی نصب نمی‌شود.",
+    en: "The site's SEO plugin was found: SEO title, meta description, canonical and robots are written through that plugin's own API, and every change is checked on the live page; nothing is installed.",
+  }],
+  [/^Several SEO plugins are active/, {
+    fa: "چند افزونه‌ی سئو هم‌زمان فعال‌اند؛ اصلاح‌ها از راه یکی از آن‌ها نوشته می‌شوند و روی صفحه بررسی می‌شوند.",
+    en: "Several SEO plugins are active; fixes are written through one of them and checked on the page.",
+  }],
+  [/^Yoast SEO detected: Yoast has no API/, {
+    fa: "Yoast SEO پیدا شد: Yoast هیچ API برای تغییر فیلدهایش ندارد، پس عنوان سئو، توضیحات متا، canonical و robots از راه REST قابل نوشتن نیستند. Cloudflare را وصل کنید (بدون نصب روی سایت) یا افزونه‌ی SEO Table Bridge را نصب کنید.",
+    en: "Yoast SEO detected: Yoast has no API for changing its fields, so SEO title, meta description, canonical and robots cannot be written over the REST API. Connect Cloudflare (nothing to install on the site) or install the SEO Table bridge plugin.",
+  }],
+  [/^No SEO Table bridge plugin and no supported SEO plugin/, {
+    fa: "نه افزونه‌ی SEO Table Bridge نصب است و نه افزونه‌ی سئوی پشتیبانی‌شده (Rank Math، SEOPress، All in One SEO)؛ عنوان سئو، canonical و robots از راه REST وردپرس قابل نوشتن نیستند.",
+    en: "No SEO Table bridge plugin and no supported SEO plugin (Rank Math, SEOPress, All in One SEO): SEO title, canonical and robots are not writable over the WordPress REST API.",
+  }],
+  [/^This site shows each post's excerpt as its meta description/, {
+    fa: "این سایت «چکیده»ی هر نوشته را به‌عنوان توضیحات متا نشان می‌دهد، پس توضیحات در چکیده نوشته می‌شوند (پیش از هر نوشتن، روی همان صفحه بررسی می‌شود).",
+    en: "This site shows each post's excerpt as its meta description, so descriptions are written to the excerpt (checked on each page before writing).",
+  }],
+  [/^Redirects need the SEO Table bridge plugin or the Cloudflare edge/, {
+    fa: "برای ریدایرکت‌ها افزونه‌ی SEO Table Bridge یا اتصال Cloudflare لازم است.",
+    en: "Redirects need the SEO Table bridge plugin or the Cloudflare edge.",
+  }],
+  [/^The Redirection plugin is detected, but/, {
+    fa: "افزونه‌ی Redirection پیدا شد، اما SEO Table ریدایرکت‌ها را فقط از راه افزونه‌ی پل می‌نویسد.",
+    en: "The Redirection plugin is detected, but SEO Table writes redirects only through its bridge plugin.",
+  }],
+  [/^Cloudflare edge worker is not installed yet/, {
+    fa: "Worker لبه در Cloudflare هنوز نصب نشده است؛ برای اعمال اصلاح‌ها در لبه‌ی Cloudflare آن را نصب کنید.",
+    en: "The Cloudflare edge worker is not installed yet: install it to apply fixes at the edge.",
+  }],
+  [/^Cloudflare edge: title, meta description/, {
+    fa: "لبه‌ی Cloudflare: عنوان، توضیحات متا، canonical، robots، متن جانشین تصاویر و ریدایرکت‌ها در لبه‌ی Cloudflare اعمال می‌شوند؛ هیچ چیزی روی سایت نصب نمی‌شود.",
+    en: "Cloudflare edge: title, meta description, canonical, robots, image alt text and redirects are applied at Cloudflare's edge; nothing is installed on the site.",
+  }],
+  [/^Edge changes reach every Cloudflare location/, {
+    fa: "تغییرات لبه حداکثر ظرف حدود یک دقیقه به همه‌ی مراکز Cloudflare می‌رسند.",
+    en: "Edge changes reach every Cloudflare location within about a minute.",
+  }],
+  [/^The edge worker on Cloudflare is outdated/, {
+    fa: "Worker لبه در Cloudflare قدیمی است؛ برای به‌روزرسانی دوباره نصبش کنید.",
+    en: "The edge worker on Cloudflare is outdated: reinstall it to update.",
+  }],
+  [/^Other Workers own these routes/, {
+    fa: "Workerهای دیگری این مسیرها را در اختیار دارند و این مسیرها بازنویسی نمی‌شوند.",
+    en: "Other Workers own some routes on this site, so those paths are not rewritten.",
+  }],
+  [/^Another Worker already serves/, {
+    fa: "Worker دیگری از قبل روی این نشانی فعال است؛ تا route آن برداشته نشود، Worker لبه نصب نمی‌شود.",
+    en: "Another Worker already runs on this address; the edge worker cannot be installed until its route is removed.",
+  }],
+  [/^Supplies query, impression, click and position data/, {
+    fa: "داده‌های جست‌وجو (نمایش، کلیک و جایگاه) را برای فرصت‌های محتوایی می‌آورد، نشانی‌ها را بازرسی می‌کند و نقشه‌ی سایت ثبت می‌کند (ثبت به نقش Owner یا Full نیاز دارد).",
+    en: "Supplies query, impression, click and position data for Content Opportunities, inspects URLs, and submits sitemaps (submitting needs Owner or Full access).",
+  }],
+  [/^The site is not behind Cloudflare/, {
+    fa: "سایت پشت Cloudflare نیست: برای اعمال اصلاح‌ها در لبه، DNS دامنه را به Cloudflare منتقل کنید (پلن رایگان کافی است).",
+    en: "The site is not behind Cloudflare: move the domain's DNS to Cloudflare (the free plan is enough) to apply fixes at the edge.",
+  }],
+  [/^Not a WordPress site\.$/, {
+    fa: "این سایت وردپرسی نیست.",
+    en: "Not a WordPress site.",
+  }],
+  [/^Yoast SEO has no API for writing its fields/, {
+    fa: "Yoast SEO هیچ API برای نوشتن فیلدهایش ندارد: بدون افزونه‌ی پل فقط متن جانشین تصاویر قابل تغییر است.",
+    en: "Yoast SEO has no API for writing its fields: without the bridge plugin only image alt text can be changed.",
+  }],
+  [/^Recommended: the site is behind Cloudflare/, {
+    fa: "پیشنهاد ما: سایت پشت Cloudflare است، پس همه‌ی اصلاح‌های پشتیبانی‌شده بدون نصب هیچ چیزی روی سایت، در لبه‌ی Cloudflare اعمال می‌شوند.",
+    en: "Recommended: the site is behind Cloudflare, so every supported fix can be applied at the edge without installing anything on the site.",
+  }],
+  [/^Recommended: (Rank Math|SEOPress|All in One SEO) can be written through its own API/, {
+    fa: "پیشنهاد ما: افزونه‌ی سئوی سایت را می‌توان با یک Application Password وردپرس از راه API خودش نوشت؛ نصب چیزی لازم نیست.",
+    en: "Recommended: the site's SEO plugin can be written through its own API with a WordPress application password; nothing to install.",
+  }],
+  [/^Recommended: this WordPress site's SEO fields can only be changed with the SEO Table bridge plugin/, {
+    fa: "پیشنهاد ما: فیلدهای سئوی این سایت وردپرسی فقط با افزونه‌ی SEO Table Bridge (یا از راه Cloudflare) قابل تغییرند.",
+    en: "Recommended: this WordPress site's SEO fields can only be changed with the SEO Table bridge plugin (or through Cloudflare).",
+  }],
+  [/^Recommended: nothing on this site can be connected for writing/, {
+    fa: "پیشنهاد ما: هیچ بخشی از این سایت برای نوشتن قابل اتصال نیست؛ بسته‌ی اصلاحات را دانلود کنید و فایل‌هایش را دستی اعمال کنید.",
+    en: "Recommended: nothing on this site can be connected for writing; download the fix pack and apply its files by hand.",
+  }],
+  [/^Always available: every proposed fix as files/, {
+    fa: "همیشه در دسترس: همه‌ی اصلاح‌های پیشنهادی به‌صورت فایل (قوانین ریدایرکت، جدول متا، نقشه‌ی سایت، robots.txt) برای اعمال دستی.",
+    en: "Always available: every proposed fix as files (redirect rules, a meta table, a sitemap, robots.txt) to apply by hand.",
+  }],
+  [/^The site's platform has not been detected yet/, {
+    fa: "پلتفرم سایت هنوز شناسایی نشده، پس هنوز روشی پیشنهاد نمی‌شود.",
+    en: "The site's platform has not been detected yet, so no connection method is recommended.",
+  }],
   [/^The site blocks the REST users endpoint/, {
     fa: "یک افزونه‌ی امنیتی بخش «کاربران» REST را بسته است؛ مشکلی نیست و ویرایش کار می‌کند.",
     en: "The site blocks the REST users endpoint (usually a security plugin); editing still works.",
@@ -118,6 +331,8 @@ export function connectorMessage(
   if (result.ok) {
     const who = message.match(/^Connected as (.+)\.$/)?.[1];
     if (who) return locale === "fa" ? `متصل شد با حساب ${who}.` : `Connected as ${who}.`;
+    const zone = message.match(/^Connected to Cloudflare zone (.+)\.$/)?.[1];
+    if (zone) return locale === "fa" ? `به zone ‏${zone} در Cloudflare متصل شد.` : `Connected to Cloudflare zone ${zone}.`;
     return message;
   }
   // A network failure's message is the raw socket error (resolver output,
@@ -125,12 +340,59 @@ export function connectorMessage(
   if (result.reason === "network_error") return REASONS.network_error![locale];
   const text = result.reason ? REASONS[result.reason]?.[locale] : undefined;
   if (!text) return message;
+  if (result.reason === "missing_permission") {
+    // The permission's name as Cloudflare's token editor shows it, never translated.
+    const permission = message.match(/lacks the "([^"]+)" permission/)?.[1];
+    return permission ? `${text} ${permission}` : text;
+  }
   if (result.reason === "redirected") {
     const location = message.match(/redirecting to (\S+?);/)?.[1];
     return location ? `${text} (${location})` : text;
   }
   const detail = message.match(/\((?:HTTP )?\d{3}[^)]*\)/)?.[0];
   return detail ? `${text} ${detail}` : text;
+}
+
+/**
+ * Audit-log sentences for the actions the connection routes record
+ * (connector.install_edge, connector.uninstall_edge,
+ * search_console.submit_sitemap, project.write_target, fixpack.download);
+ * null for any other action. activity.ts falls back to this.
+ */
+export function describeConnectionAction(action: string, metadata: unknown, locale: Locale): string | null {
+  const m = (metadata ?? {}) as Record<string, unknown>;
+  const fa = locale === "fa";
+  const failed = m.ok === false;
+  const target = (kind: unknown) =>
+    kind === "CLOUDFLARE" ? "Cloudflare" : kind === "WORDPRESS" ? (fa ? "وردپرس" : "WordPress") : fa ? "خودکار" : "automatic";
+  switch (action) {
+    case "connector.install_edge":
+      if (failed) return fa ? "نصب Worker لبه در Cloudflare ناموفق بود" : "Installing the Cloudflare edge worker failed";
+      return fa ? "Worker لبه در Cloudflare نصب شد" : "Cloudflare edge worker installed";
+    case "connector.uninstall_edge":
+      if (failed) return fa ? "حذف Worker لبه از Cloudflare ناموفق بود" : "Removing the Cloudflare edge worker failed";
+      return fa ? "Worker لبه از Cloudflare حذف شد" : "Cloudflare edge worker removed";
+    case "search_console.submit_sitemap":
+      if (failed) return fa ? "ثبت نقشه‌ی سایت در Search Console ناموفق بود" : "Sitemap submission to Search Console failed";
+      return fa ? "نقشه‌ی سایت در Search Console ثبت شد" : "Sitemap submitted to Search Console";
+    case "project.write_target":
+      return fa ? `مقصد اعمال اصلاح‌ها: ${target(m.to)}` : `Fixes are now written through: ${target(m.to)}`;
+    case "fixpack.download":
+      return fa ? "بسته‌ی اصلاحات دانلود شد" : "Fix pack downloaded";
+    default:
+      return null;
+  }
+}
+
+/** The viewer's language from the locale cookie, as every page reads it. */
+export function requestLocale(req: { cookies: { get(name: string): { value: string } | undefined } }): Locale {
+  const value = req.cookies.get("locale")?.value;
+  return isLocale(value) ? value : DEFAULT_LOCALE;
+}
+
+/** A per-change result code from the connectors listed above, or null when it is not one of theirs. */
+export function connectorResultMessage(code: string | undefined, locale: Locale): string | null {
+  return (code && CONNECTOR_RESULT_CODES[code]?.[locale]) || null;
 }
 
 /** What goes in `connectors.last_error`: the reason code and an English sentence safe to show later. */

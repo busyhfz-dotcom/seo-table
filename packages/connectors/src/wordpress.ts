@@ -8,9 +8,18 @@
  *    only an image outside the content (a featured image) uses the media item's
  *    `alt_text`.
  *  - SEO title, meta description, canonical, robots: core has no such fields.
- *    Yoast and Rank Math keep them in post meta that REST cannot write, so they
- *    need the bridge plugin; without it they are reported as unsupported rather
- *    than faked. The visible post title is never used as a stand-in.
+ *    In order of preference they are written through
+ *      1. the SEO Table bridge plugin, when installed;
+ *      2. the SEO plugin the site already runs, through that plugin's own REST
+ *         API (Rank Math, SEOPress, All in One SEO — wp-seo-plugins.ts). Yoast
+ *         has no write API, so a Yoast-only site gets no SEO-field writes;
+ *      3. for the meta description only, the post excerpt — and only on a site
+ *         whose pages render their excerpt as the description, which is probed
+ *         once and re-checked on every write.
+ *    Paths 2 and 3 read the rendered page before and after each write: the
+ *    change must show up on the page and nothing else may move, otherwise it
+ *    is put back and reported. The visible post title is never used as a
+ *    stand-in for the SEO title.
  *  - Redirects: core has no redirect table; only the bridge's is supported.
  *
  * Every write targets the post whose permalink IS the requested URL: the post
@@ -21,6 +30,15 @@
  * `packages/connectors/wordpress-plugin/seo-table-bridge.php`.
  */
 import type { FixAction } from "@seo/db";
+import { normalizeUrl } from "@seo/core";
+import { fetchLivePage, liveField } from "./live-page.js";
+import {
+  SEO_PLUGIN_LABELS,
+  SEO_PLUGIN_NAMESPACES,
+  robotsDirectives,
+  seoPluginWriter,
+  type SeoPluginKind,
+} from "./wp-seo-plugins.js";
 import {
   ConnectorError,
   httpJson,
@@ -42,6 +60,9 @@ const BRIDGE_NS = "seo-table/v1";
 /** The oldest bridge with path resolution, deletes and the hardened permission checks. */
 const MIN_BRIDGE_VERSION = [0, 5, 0] as const;
 const BRIDGE_POST_FIELDS = ["title", "meta_description", "canonical", "meta_robots"];
+/** Fields an SEO plugin (or the excerpt) can carry, verified on the rendered page. */
+const RENDERED_FIELDS = ["title", "meta_description", "canonical", "meta_robots"] as const;
+const WRITABLE_PLUGINS: SeoPluginKind[] = ["rankmath", "seopress", "aioseo"];
 
 type WpRoot = { namespaces?: string[]; name?: string; description?: string };
 type WpPost = {
@@ -61,6 +82,17 @@ type WpMedia = {
 };
 type BridgeInfo = { version?: string };
 
+/** Something other than the bridge that can store an SEO field for a post. */
+type FieldWriter = {
+  label: string;
+  fields: readonly string[];
+  set: (post: ResolvedPost, field: string, value: string | null) => Promise<void>;
+  /** Refuses (throws) when writing here would not change what the page shows. */
+  precondition?: (post: ResolvedPost, rendered: Rendered) => Promise<void>;
+};
+type Rendered = Record<(typeof RENDERED_FIELDS)[number], string | null>;
+type Probe = ConnectorCapabilities & { bridge: boolean; writer: FieldWriter | null };
+
 /** Post types that never own a public permalink worth fixing. */
 const NON_CONTENT_TYPES = new Set(["attachment", "nav_menu_item", "revision", "custom_css", "customize_changeset", "oembed_cache", "user_request"]);
 
@@ -69,7 +101,7 @@ export function wordpress(creds: WordPressCredentials): Connector {
   const auth = `Basic ${Buffer.from(`${creds.username}:${creds.applicationPassword}`).toString("base64")}`;
   const headers = { authorization: auth, "content-type": "application/json", accept: "application/json" };
 
-  let capCache: (ConnectorCapabilities & { bridge: boolean }) | null = null;
+  let capCache: Probe | null = null;
 
   const api = <T>(path: string, init: RequestInit = {}) =>
     httpJson<T>(`${base}/wp-json/${path}`, { headers, ...init });
@@ -85,7 +117,7 @@ export function wordpress(creds: WordPressCredentials): Connector {
     return data;
   }
 
-  async function probeCapabilities(): Promise<ConnectorCapabilities & { bridge: boolean }> {
+  async function probeCapabilities(): Promise<Probe> {
     if (capCache) return capCache;
     const info = await root();
     const ns = new Set(info.namespaces ?? []);
@@ -108,24 +140,161 @@ export function wordpress(creds: WordPressCredentials): Connector {
         );
       }
     }
+    let writer: FieldWriter | null = null;
     if (!bridge) {
-      notes.push(
-        "Without the SEO Table bridge plugin, SEO title, meta description, canonical, robots and redirects are not writable over the WordPress REST API.",
-      );
-      if (ns.has("yoast/v1")) notes.push("Yoast detected (read-only over REST). Install the bridge plugin to let fixes write its fields.");
-      if (ns.has("rankmath/v1")) notes.push("Rank Math detected (read-only over REST). Install the bridge plugin to let fixes write its fields.");
+      const plugins = WRITABLE_PLUGINS.filter((k) => ns.has(SEO_PLUGIN_NAMESPACES[k]));
+      if (plugins[0]) {
+        const plugin = seoPluginWriter(plugins[0], api);
+        writer = { label: plugin.label, fields: plugin.fields, set: (post, field, value) => plugin.set(post.id, field, value) };
+        writableFields.push(...plugin.fields);
+        supportedActions.push("TITLE_REWRITE", "META_REWRITE", "CANONICAL_FIX", "ROBOTS_FIX");
+        notes.push(
+          `${plugin.label} detected: SEO title, meta description, canonical and robots are written through ${plugin.label}'s own REST API, and every change is checked on the live page.`,
+        );
+        if (plugins.length > 1) {
+          notes.push(`Several SEO plugins are active (${plugins.map((k) => SEO_PLUGIN_LABELS[k]).join(", ")}); fixes are written through ${plugin.label}.`);
+        }
+      } else if (ns.has(SEO_PLUGIN_NAMESPACES.yoast)) {
+        notes.push(
+          "Yoast SEO detected: Yoast has no API for changing its fields, so SEO title, meta description, canonical and robots cannot be written over the REST API. Connect Cloudflare (nothing to install on the site) or install the SEO Table bridge plugin.",
+        );
+      } else {
+        notes.push(
+          "No SEO Table bridge plugin and no supported SEO plugin (Rank Math, SEOPress, All in One SEO): SEO title, canonical and robots are not writable over the WordPress REST API.",
+        );
+      }
+      if (!writer && (await excerptIsDescription())) {
+        writer = excerptWriter();
+        writableFields.push("meta_description");
+        supportedActions.push("META_REWRITE");
+        notes.push("This site shows each post's excerpt as its meta description, so descriptions are written to the excerpt (checked on every page before writing).");
+      }
+      notes.push("Redirects need the SEO Table bridge plugin or the Cloudflare edge.");
       if (ns.has("redirection/v1")) {
         notes.push("The Redirection plugin is detected, but SEO Table writes redirects only through its bridge plugin.");
       }
     }
 
-    capCache = { writableFields, supportedActions, notes, bridge };
+    capCache = { writableFields, supportedActions, notes, bridge, writer };
     return capCache;
   }
 
   async function capabilities(): Promise<ConnectorCapabilities> {
     const { writableFields, supportedActions, notes } = await probeCapabilities();
     return { writableFields, supportedActions, notes };
+  }
+
+  // ---- the excerpt as meta description --------------------------------------
+
+  async function excerptOf(post: { restNamespace: string; restBase: string; id: number }): Promise<string> {
+    const res = await api<{ excerpt?: { raw?: string } }>(`${post.restNamespace}/${post.restBase}/${post.id}?context=edit&_fields=excerpt`);
+    const raw = res.data?.excerpt?.raw;
+    if (res.status >= 400 || typeof raw !== "string") {
+      throw new ConnectorError("content_unreadable", `Could not read the excerpt of post ${post.id} (HTTP ${res.status})`);
+    }
+    return raw;
+  }
+
+  /**
+   * Does this theme (or plugin) print the excerpt as the meta description?
+   * Judged on the newest post that has a hand-written excerpt.
+   */
+  async function excerptIsDescription(): Promise<boolean> {
+    try {
+      const res = await api<Array<{ id: number; link: string; excerpt?: { raw?: string } }>>(
+        "wp/v2/posts?context=edit&per_page=5&_fields=id,link,excerpt",
+      );
+      const sample = Array.isArray(res.data) ? res.data.find((p) => p.excerpt?.raw?.trim()) : undefined;
+      if (!sample) return false;
+      const rendered = liveField(await fetchLivePage(sample.link), "meta_description");
+      return rendered !== null && collapse(stripTags(sample.excerpt!.raw!)) === collapse(rendered);
+    } catch {
+      return false;
+    }
+  }
+
+  function excerptWriter(): FieldWriter {
+    return {
+      label: "the post excerpt",
+      fields: ["meta_description"],
+      async precondition(post, rendered) {
+        const excerpt = collapse(stripTags(await excerptOf(post)));
+        if (!excerpt || excerpt !== collapse(rendered.meta_description ?? "")) {
+          throw new ConnectorError(
+            "description_not_from_excerpt",
+            "This page's meta description does not come from its excerpt, so changing the excerpt would not change it.",
+          );
+        }
+      },
+      async set(post, _field, value) {
+        const res = await api<WpPost>(`${post.restNamespace}/${post.restBase}/${post.id}`, {
+          method: "POST",
+          body: JSON.stringify({ excerpt: value ?? "" }),
+        });
+        if (res.status >= 400) throw new ConnectorError(`http_${res.status}`, res.text.slice(0, 300));
+      },
+    };
+  }
+
+  // ---- writes verified on the rendered page ---------------------------------
+
+  async function rendered(url: string): Promise<Rendered> {
+    const page = await fetchLivePage(url);
+    const out = {} as Rendered;
+    for (const f of RENDERED_FIELDS) out[f] = liveField(page, f);
+    return out;
+  }
+
+  /** Put a field back to what the page showed, preferring the plugin's own default. */
+  async function putBack(writer: FieldWriter, post: ResolvedPost, url: string, field: string, value: string | null): Promise<void> {
+    await writer.set(post, field, null);
+    if (value === null || shows(field, (await rendered(url))[field as keyof Rendered], value)) return;
+    await writer.set(post, field, value);
+  }
+
+  /**
+   * Write through a plugin (or the excerpt) and prove it on the page: the field
+   * must show the new value and no other field may have moved. Otherwise what
+   * changed is put back and the write is reported as failed. A rollback
+   * ("restore") first tries clearing the plugin's value, so a template default
+   * comes back as a template rather than as frozen text.
+   */
+  async function writeRendered(writer: FieldWriter, req: WriteRequest): Promise<WriteResult> {
+    const post = await resolvePost(req.url);
+    const before = await rendered(req.url);
+    await writer.precondition?.(post, before);
+    const field = req.field as keyof Rendered;
+    const previous = before[field];
+    const done = (now: Rendered): WriteResult => ({ url: req.url, field: req.field, ok: true, applied: now[field], previous });
+
+    if (req.intent === "restore" && req.after !== null) {
+      await writer.set(post, req.field, null);
+      const cleared = await rendered(req.url);
+      if (shows(req.field, cleared[field], req.after) && moved(before, cleared, field).length === 0) return done(cleared);
+    }
+
+    await writer.set(post, req.field, req.after);
+    const after = await rendered(req.url);
+    const collateral = moved(before, after, field);
+    if (shows(req.field, after[field], req.after) && collateral.length === 0) return done(after);
+
+    const undo = [field, ...collateral].filter((f) => writer.fields.includes(f));
+    let undone = true;
+    for (const f of undo) {
+      await putBack(writer, post, req.url, f, before[f]).catch(() => {
+        undone = false;
+      });
+    }
+    const why = collateral.length
+      ? `Writing through ${writer.label} also changed ${collateral.join(", ")} on the page`
+      : `The page did not show the new ${req.field} after writing through ${writer.label} (a theme, another plugin or a page cache overrides it)`;
+    return {
+      url: req.url,
+      field: req.field,
+      ok: false,
+      code: collateral.length ? "collateral_change" : "not_visible_on_page",
+      error: `${why}; ${undone ? "the change was undone" : "undoing it failed, check the page by hand"}.`,
+    };
   }
 
   /**
@@ -377,7 +546,15 @@ export function wordpress(creds: WordPressCredentials): Connector {
       const loc = await locateImage(req.url, req.selector);
       return loc.kind === "content" ? loc.alt : emptyToNull(loc.media.alt_text);
     }
-    if (!bridge) throw new ConnectorError("unsupported_field", `WordPress cannot read "${req.field}" without the bridge plugin.`);
+    if (!bridge) {
+      const { writer } = await probeCapabilities();
+      if (writer?.fields.includes(req.field)) {
+        // The page is the truth for plugin fields: what they store may be a template.
+        await resolvePost(req.url);
+        return liveField(await fetchLivePage(req.url), req.field);
+      }
+      throw new ConnectorError("unsupported_field", `WordPress cannot read "${req.field}" on this site without the bridge plugin.`);
+    }
     if (req.field === "redirect") {
       const res = await api<{ to?: string | null }>(`${BRIDGE_NS}/redirects?from=${encodeURIComponent(req.url)}`);
       if (res.status >= 400 || !res.data) throw new ConnectorError(`http_${res.status}`, res.text.slice(0, 300));
@@ -425,6 +602,9 @@ export function wordpress(creds: WordPressCredentials): Connector {
         return done(emptyToNull(res.data?.alt_text ?? req.after), emptyToNull(loc.media.alt_text));
       }
 
+      const { writer } = await probeCapabilities();
+      if (!bridge && writer?.fields.includes(req.field)) return await writeRendered(writer, req);
+
       if (!bridge || (req.field !== "redirect" && !BRIDGE_POST_FIELDS.includes(req.field))) {
         return fail(
           "unsupported_field",
@@ -466,6 +646,36 @@ export function wordpress(creds: WordPressCredentials): Connector {
 }
 
 // ---- helpers ------------------------------------------------------------------
+
+function collapse(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function stripTags(html: string): string {
+  return html.replace(/<[^>]*>/g, " ");
+}
+
+/** Does the page's value satisfy what was written? null (cleared) accepts any default. */
+function shows(field: string, rendered: string | null, wanted: string | null): boolean {
+  if (wanted === null) return true;
+  if (rendered === null) return false;
+  if (field === "canonical") return normalizeUrl(rendered) === normalizeUrl(wanted);
+  if (field === "meta_robots") {
+    // Plugins append their own extras (max-snippet, max-image-preview): every
+    // directive asked for must be there, and none may be contradicted.
+    const have = new Set(robotsDirectives(rendered));
+    const want = robotsDirectives(wanted);
+    const contradicts = (d: string) =>
+      (d === "index" && (have.has("noindex") || have.has("none"))) || (d === "follow" && (have.has("nofollow") || have.has("none")));
+    return want.every((d) => have.has(d) && !contradicts(d));
+  }
+  return collapse(rendered) === collapse(wanted);
+}
+
+/** Fields other than `field` whose rendered value changed. */
+function moved(before: Rendered, after: Rendered, field: keyof Rendered): Array<keyof Rendered> {
+  return RENDERED_FIELDS.filter((f) => f !== field && (before[f] ?? "") !== (after[f] ?? ""));
+}
 
 function emptyToNull(v: string | null | undefined): string | null {
   return v === undefined || v === null || v === "" ? null : v;

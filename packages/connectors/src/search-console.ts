@@ -16,6 +16,7 @@ import {
 } from "./types.js";
 
 const API = "https://searchconsole.googleapis.com/webmasters/v3";
+const INSPECT_API = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
 
 export type SearchConsoleCredentials = {
   /** e.g. "sc-domain:example.ir" or "https://shop.example.ir/" */
@@ -49,22 +50,100 @@ export type Opportunity = QueryRow & {
 /** The API's hard maximum rows per request; larger sets page with startRow. */
 const PAGE_ROWS = 25_000;
 
-async function auth(creds: SearchConsoleCredentials): Promise<Record<string, string>> {
-  const token = await accessToken(creds.google, [...SCOPES.searchConsole]);
+async function auth(creds: SearchConsoleCredentials, scopes: readonly string[] = SCOPES.searchConsole): Promise<Record<string, string>> {
+  const token = await accessToken(creds.google, [...scopes]);
   return { authorization: `Bearer ${token}`, "content-type": "application/json" };
 }
 
-export function searchConsole(creds: SearchConsoleCredentials): Connector & {
+/** URL Inspection, reduced to what the panel shows. Field values are Google's own enums. */
+export type UrlInspection = {
+  url: string;
+  /** PASS | PARTIAL | FAIL | NEUTRAL | VERDICT_UNSPECIFIED */
+  verdict: string | null;
+  /** Google's sentence, e.g. "Submitted and indexed" (English, as Google sends it). */
+  coverageState: string | null;
+  indexingState: string | null;
+  robotsTxtState: string | null;
+  pageFetchState: string | null;
+  lastCrawlTime: string | null;
+  crawledAs: string | null;
+  googleCanonical: string | null;
+  userCanonical: string | null;
+  sitemaps: string[];
+  referringUrls: string[];
+  mobileUsabilityVerdict: string | null;
+  richResults: { verdict: string | null; types: string[] };
+  /** Opens the same report in Search Console. */
+  inspectionResultLink: string | null;
+};
+
+type InspectResponse = {
+  inspectionResult?: {
+    inspectionResultLink?: string;
+    indexStatusResult?: {
+      verdict?: string;
+      coverageState?: string;
+      indexingState?: string;
+      robotsTxtState?: string;
+      pageFetchState?: string;
+      lastCrawlTime?: string;
+      crawledAs?: string;
+      googleCanonical?: string;
+      userCanonical?: string;
+      sitemap?: string[];
+      referringUrls?: string[];
+    };
+    mobileUsabilityResult?: { verdict?: string };
+    richResultsResult?: { verdict?: string; detectedItems?: Array<{ richResultType?: string }> };
+  };
+  error?: { message?: string; status?: string };
+};
+
+/**
+ * Whether `url` belongs to the property: a domain property ("sc-domain:x")
+ * covers x and its subdomains on any scheme; a URL-prefix property covers
+ * addresses that start with it.
+ */
+export function inProperty(siteUrl: string, url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (siteUrl.startsWith("sc-domain:")) {
+    const domain = siteUrl.slice("sc-domain:".length).toLowerCase();
+    const host = u.hostname.toLowerCase();
+    return host === domain || host.endsWith(`.${domain}`);
+  }
+  return url.startsWith(siteUrl);
+}
+
+/** Google's error body, mapped to a reason the panel explains. */
+function googleFailure(status: number, text: string, what: string): ConnectorError {
+  let reason = `http_${status}`;
+  if (status === 403 && /insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(text)) reason = "insufficient_scope";
+  else if (status === 403) reason = "insufficient_permission";
+  else if (status === 429) reason = "quota_exceeded";
+  else if (status === 404) reason = "site_not_found";
+  return new ConnectorError(reason, `${what} failed (HTTP ${status}): ${text.slice(0, 200)}`);
+}
+
+export type SearchConsoleClient = Connector & {
   queries: (range: { start: Date; end: Date }, limit?: number) => Promise<QueryRow[]>;
   opportunities: (range: { start: Date; end: Date }) => Promise<Opportunity[]>;
   indexedPages: (range: { start: Date; end: Date }, limit?: number) => Promise<Set<string>>;
-} {
+  submitSitemap: (sitemapUrl: string) => Promise<void>;
+  inspectUrl: (url: string, languageCode?: string) => Promise<UrlInspection>;
+};
+
+export function searchConsole(creds: SearchConsoleCredentials): SearchConsoleClient {
   async function capabilities(): Promise<ConnectorCapabilities> {
     return {
       writableFields: [],
       supportedActions: [],
       notes: [
-        "Read-only. Supplies query, impression, click and position data for Content Opportunities.",
+        "Supplies query, impression, click and position data for Content Opportunities, inspects URLs, and submits sitemaps (submitting needs Owner or Full access).",
       ],
     };
   }
@@ -203,7 +282,60 @@ export function searchConsole(creds: SearchConsoleCredentials): Connector & {
     return pages;
   }
 
-  return { kind: "SEARCH_CONSOLE", check, capabilities, queries, opportunities, indexedPages };
+  /**
+   * Submit (or resubmit) a sitemap: PUT sites/{site}/sitemaps/{feedpath}.
+   * Needs the full webmasters scope and Owner or Full permission on the property.
+   */
+  async function submitSitemap(sitemapUrl: string): Promise<void> {
+    if (!inProperty(creds.siteUrl, sitemapUrl)) {
+      throw new ConnectorError("sitemap_outside_property", `${sitemapUrl} is not inside the Search Console property ${creds.siteUrl}.`);
+    }
+    const headers = await auth(creds, SCOPES.searchConsoleWrite);
+    const res = await httpJson<unknown>(
+      `${API}/sites/${encodeURIComponent(creds.siteUrl)}/sitemaps/${encodeURIComponent(sitemapUrl)}`,
+      { method: "PUT", headers },
+    );
+    if (res.status >= 400) throw googleFailure(res.status, res.text, "Submitting the sitemap");
+  }
+
+  /** URL Inspection API: Google's index status for one URL (read-only scope; 2,000 a day per property). */
+  async function inspectUrl(url: string, languageCode = "en-US"): Promise<UrlInspection> {
+    if (!inProperty(creds.siteUrl, url)) {
+      throw new ConnectorError("url_outside_property", `${url} is not inside the Search Console property ${creds.siteUrl}.`);
+    }
+    const headers = await auth(creds);
+    const res = await httpJson<InspectResponse>(INSPECT_API, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ inspectionUrl: url, siteUrl: creds.siteUrl, languageCode }),
+      timeoutMs: 40_000,
+    });
+    if (res.status >= 400 || !res.data?.inspectionResult) throw googleFailure(res.status, res.text, "URL inspection");
+    const r = res.data.inspectionResult;
+    const index = r.indexStatusResult ?? {};
+    return {
+      url,
+      verdict: index.verdict ?? null,
+      coverageState: index.coverageState ?? null,
+      indexingState: index.indexingState ?? null,
+      robotsTxtState: index.robotsTxtState ?? null,
+      pageFetchState: index.pageFetchState ?? null,
+      lastCrawlTime: index.lastCrawlTime ?? null,
+      crawledAs: index.crawledAs ?? null,
+      googleCanonical: index.googleCanonical ?? null,
+      userCanonical: index.userCanonical ?? null,
+      sitemaps: index.sitemap ?? [],
+      referringUrls: index.referringUrls ?? [],
+      mobileUsabilityVerdict: r.mobileUsabilityResult?.verdict ?? null,
+      richResults: {
+        verdict: r.richResultsResult?.verdict ?? null,
+        types: [...new Set((r.richResultsResult?.detectedItems ?? []).map((i) => i.richResultType).filter((t): t is string => Boolean(t)))],
+      },
+      inspectionResultLink: r.inspectionResultLink ?? null,
+    };
+  }
+
+  return { kind: "SEARCH_CONSOLE", check, capabilities, queries, opportunities, indexedPages, submitSitemap, inspectUrl };
 }
 
 /** Explainable buckets — each one names the actual shape of the gap. */
