@@ -27,6 +27,9 @@ importers:
       '@seo/pipeline':
         specifier: workspace:*
         version: link:packages/pipeline
+      '@seo/seo-data':
+        specifier: workspace:*
+        version: link:packages/seo-data
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.4
@@ -60,6 +63,9 @@ importers:
       '@seo/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
+      '@seo/seo-data':
+        specifier: workspace:*
+        version: link:../../packages/seo-data
       next:
         specifier: 15.5.25
         version: 15.5.25(@types/node@22.20.4)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -112,6 +118,9 @@ importers:
       '@seo/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
+      '@seo/seo-data':
+        specifier: workspace:*
+        version: link:../../packages/seo-data
       bullmq:
         specifier: ^5.34.6
         version: 5.81.5
@@ -240,6 +249,34 @@ importers:
       '@seo/db':
         specifier: workspace:*
         version: link:../db
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/seo-data:
+    dependencies:
+      '@seo/connectors':
+        specifier: workspace:*
+        version: link:../connectors
+      '@seo/core':
+        specifier: workspace:*
+        version: link:../core
+      '@seo/db':
+        specifier: workspace:*
+        version: link:../db
+      cheerio:
+        specifier: ^1.0.0
+        version: 1.2.0
+      cron-parser:
+        specifier: 4.9.0
+        version: 4.9.0
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^22.10.2

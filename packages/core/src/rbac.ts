@@ -29,6 +29,10 @@ export const PERMISSIONS = [
   "apikey:manage",
   "auditlog:read",
   "billing:manage",
+  // Tracked keywords, competitors, and starting rank / PageSpeed / competitor runs.
+  "tracking:write",
+  // Organization-wide paid data sources and alert channels (credentials).
+  "integration:manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -43,6 +47,7 @@ const EDITOR: Permission[] = [
   "fix:propose",
   "fix:apply_low_risk",
   "report:write",
+  "tracking:write",
 ];
 
 const ADMIN: Permission[] = [
@@ -54,6 +59,7 @@ const ADMIN: Permission[] = [
   "member:manage",
   "apikey:manage",
   "auditlog:read",
+  "integration:manage",
 ];
 
 const OWNER: Permission[] = [...ADMIN, "project:delete", "billing:manage"];

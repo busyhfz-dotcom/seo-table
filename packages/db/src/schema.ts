@@ -17,6 +17,8 @@ import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
+  date,
   doublePrecision,
   index,
   integer,
@@ -496,6 +498,366 @@ export const auditLog = pgTable(
   (t) => [index("audit_log_org_idx").on(t.orgId, t.createdAt), index("audit_log_action_idx").on(t.action)],
 );
 
+// ---------------------------------------------------------------- phase 2: SEO data
+//
+// Every metric row carries its source ('gsc', 'dataforseo', 'autocomplete',
+// PageSpeed) so the panel can label it, and nothing here is ever synthesised:
+// a table without a configured source stays empty.
+
+/** Postgres bytea as a Node Buffer (drizzle has no built-in for it). */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
+
+export const keywords = pgTable(
+  "keywords",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    phrase: text("phrase").notNull(),
+    locale: text("locale").notNull().default("fa"),
+    /** ISO 3166-1 alpha-2, upper case. */
+    country: varchar("country", { length: 2 }).notNull().default("IR"),
+    /** null = all devices. */
+    device: text("device").$type<KeywordDevice | null>(),
+    targetUrl: text("target_url"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (t) => [
+    // coalesce: a NULL device ("all devices") must collide with another NULL,
+    // which a plain unique index would let through.
+    uniqueIndex("keywords_project_phrase_uq").on(t.projectId, sql`lower(${t.phrase})`, t.country, sql`coalesce(${t.device}, '')`),
+    index("keywords_project_idx").on(t.projectId, t.archivedAt),
+    check("keywords_device_ck", sql`${t.device} IS NULL OR ${t.device} IN ('desktop', 'mobile')`),
+    check("keywords_country_ck", sql`${t.country} ~ '^[A-Z]{2}$'`),
+  ],
+);
+
+export const keywordPositions = pgTable(
+  "keyword_positions",
+  {
+    id: id(),
+    keywordId: varchar("keyword_id", { length: 30 })
+      .notNull()
+      .references(() => keywords.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    source: text("source").notNull().$type<PositionSource>(),
+    /** gsc: average position that day; dataforseo: the organic rank (rank_group). null = not in the results. */
+    position: doublePrecision("position"),
+    /** The page that ranked (dataforseo), or the page with most impressions over the synced window (gsc). */
+    url: text("url"),
+    clicks: integer("clicks"),
+    impressions: integer("impressions"),
+    ctr: doublePrecision("ctr"),
+    serpFeatures: text("serp_features").array(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("keyword_positions_uq").on(t.keywordId, t.date, t.source),
+    check("keyword_positions_source_ck", sql`${t.source} IN ('gsc', 'dataforseo')`),
+  ],
+);
+
+/** Cache of keyword ideas per seed; refreshed when older than the source's TTL. */
+export const keywordIdeas = pgTable(
+  "keyword_ideas",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    seed: text("seed").notNull(),
+    idea: text("idea").notNull(),
+    source: text("source").notNull().$type<IdeaSource>(),
+    /** Suggestions differ by language and market, so they are part of the cache key. */
+    locale: text("locale").notNull().default("fa"),
+    country: varchar("country", { length: 2 }).notNull().default("IR"),
+    /** Only dataforseo fills these; autocomplete and gsc ideas have no volume data. */
+    volume: integer("volume"),
+    difficulty: integer("difficulty"),
+    cpc: doublePrecision("cpc"),
+    /** gsc ideas: the query's metrics over the period that produced it. */
+    impressions: integer("impressions"),
+    clicks: integer("clicks"),
+    position: doublePrecision("position"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("keyword_ideas_uq").on(t.projectId, t.seed, t.idea, t.source, t.locale, t.country),
+    index("keyword_ideas_lookup_idx").on(t.projectId, t.source, t.seed, t.createdAt),
+    check("keyword_ideas_source_ck", sql`${t.source} IN ('autocomplete', 'gsc', 'dataforseo')`),
+  ],
+);
+
+export const competitors = pgTable(
+  "competitors",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Bare host, lower case, no scheme ("rival.example"). */
+    domain: text("domain").notNull(),
+    name: text("name"),
+    /**
+     * The project's own site, sampled by the same code and at the same time as
+     * its competitors so the comparison is like for like. Hidden from lists;
+     * one per project.
+     */
+    isSelf: boolean("is_self").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("competitors_project_domain_uq").on(t.projectId, t.domain),
+    uniqueIndex("competitors_one_self_uq").on(t.projectId).where(sql`${t.isSelf}`),
+  ],
+);
+
+export const competitorSnapshots = pgTable(
+  "competitor_snapshots",
+  {
+    id: id(),
+    competitorId: varchar("competitor_id", { length: 30 })
+      .notNull()
+      .references(() => competitors.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    statusCode: integer("status_code").notNull(),
+    title: text("title"),
+    metaDescription: text("meta_description"),
+    h1: text("h1").array().notNull().default(sql`'{}'::text[]`),
+    /** {counts: {h1..h6}, h2: string[] (first 20)} */
+    headings: jsonb("headings").$type<HeadingSummary>(),
+    wordCount: integer("word_count").notNull().default(0),
+    schemaTypes: text("schema_types").array().notNull().default(sql`'{}'::text[]`),
+    internalLinks: integer("internal_links").notNull().default(0),
+    externalLinks: integer("external_links").notNull().default(0),
+    /** From PageSpeed Insights (mobile lab), homepage only. */
+    lcpMs: integer("lcp_ms"),
+    cls: doublePrecision("cls"),
+  },
+  (t) => [index("competitor_snapshots_idx").on(t.competitorId, t.fetchedAt)],
+);
+
+export const pageSpeed = pgTable(
+  "page_speed",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    strategy: text("strategy").notNull().$type<PageSpeedStrategy>(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Lighthouse performance score 0–100 (lab). */
+    performanceScore: integer("performance_score"),
+    lcpMs: integer("lcp_ms"),
+    cls: doublePrecision("cls"),
+    /** Lab runs have no INP; filled from CrUX field data when Google has it. */
+    inpMs: integer("inp_ms"),
+    ttfbMs: integer("ttfb_ms"),
+    fcpMs: integer("fcp_ms"),
+    tbtMs: integer("tbt_ms"),
+    /** CrUX 75th percentiles and categories; null when Google has too little traffic data. */
+    fieldData: jsonb("field_data").$type<CruxFieldData | null>(),
+    /** Top Lighthouse opportunities by estimated savings. */
+    opportunities: jsonb("opportunities").notNull().default(sql`'[]'::jsonb`).$type<PageSpeedOpportunity[]>(),
+  },
+  (t) => [
+    index("page_speed_project_url_idx").on(t.projectId, t.url, t.strategy, t.fetchedAt),
+    check("page_speed_strategy_ck", sql`${t.strategy} IN ('mobile', 'desktop')`),
+  ],
+);
+
+export const schedules = pgTable(
+  "schedules",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<ScheduleKind>(),
+    /** Five-field cron, evaluated in `timezone`. */
+    cron: text("cron").notNull(),
+    /** IANA zone name; UTC unless the user picks another. */
+    timezone: text("timezone").notNull().default("UTC"),
+    enabled: boolean("enabled").notNull().default(true),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /** Absolute UTC instant; null until the scheduler first computes it. */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("schedules_project_kind_uq").on(t.projectId, t.kind),
+    index("schedules_due_idx").on(t.enabled, t.nextRunAt),
+    check("schedules_kind_ck", sql`${t.kind} IN ('scan', 'rank', 'pagespeed', 'competitors', 'report')`),
+  ],
+);
+
+export const alertRules = pgTable(
+  "alert_rules",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<AlertKind>(),
+    /** Meaning depends on kind (points, positions, percent); null where the kind has none. */
+    threshold: doublePrecision("threshold"),
+    channels: text("channels").array().notNull().default(sql`'{in_app}'::text[]`).$type<AlertChannel[]>(),
+    webhookUrl: text("webhook_url"),
+    // HMAC key for the webhook signature, sealed like connector credentials.
+    webhookSecretCipher: text("webhook_secret_cipher"),
+    webhookSecretIv: text("webhook_secret_iv"),
+    webhookSecretTag: text("webhook_secret_tag"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("alert_rules_project_idx").on(t.projectId, t.kind),
+    check(
+      "alert_rules_kind_ck",
+      sql`${t.kind} IN ('score_drop', 'new_critical', 'rank_drop', 'page_down', 'cwv_regression', 'index_drop')`,
+    ),
+    check("alert_rules_channels_ck", sql`${t.channels} <@ ARRAY['in_app', 'webhook', 'telegram']::text[]`),
+  ],
+);
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    orgId: varchar("org_id", { length: 30 })
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: varchar("project_id", { length: 30 }).references(() => projects.id, { onDelete: "cascade" }),
+    alertRuleId: varchar("alert_rule_id", { length: 30 }).references(() => alertRules.id, { onDelete: "set null" }),
+    kind: text("kind").notNull(),
+    severity: severityEnum("severity").notNull(),
+    title: jsonb("title").notNull().$type<LocalizedText>(),
+    body: jsonb("body").notNull().$type<LocalizedText>(),
+    /** In-app path, e.g. "/keywords?project=…". */
+    link: text("link"),
+    /** Machine-readable facts behind the text (scores, keyword ids, …). */
+    data: jsonb("data"),
+    /** One notification per event, whatever retries happen ("score_drop:<runId>"). */
+    dedupeKey: text("dedupe_key"),
+    /** Per external channel: {status: 'pending'|'sent'|'failed', attempts, error?, at}. */
+    deliveries: jsonb("deliveries").notNull().default(sql`'{}'::jsonb`).$type<Record<string, NotificationDelivery>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("notifications_dedupe_uq").on(t.orgId, t.dedupeKey),
+    index("notifications_org_idx").on(t.orgId, t.createdAt),
+    index("notifications_unread_idx").on(t.orgId).where(sql`${t.readAt} IS NULL`),
+  ],
+);
+
+/** Organization-wide paid/optional data sources. Credentials sealed like connectors. */
+export const orgIntegrations = pgTable(
+  "org_integrations",
+  {
+    id: id(),
+    orgId: varchar("org_id", { length: 30 })
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<IntegrationKind>(),
+    secretCipher: text("secret_cipher"),
+    secretIv: text("secret_iv"),
+    secretTag: text("secret_tag"),
+    /** Non-secret settings and the last check's facts (balance, bot name, chat id). */
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+    status: connectorStatusEnum("status").notNull().default("NOT_CONNECTED"),
+    lastError: text("last_error"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("org_integrations_org_kind_uq").on(t.orgId, t.kind),
+    check("org_integrations_kind_ck", sql`${t.kind} IN ('DATAFORSEO', 'PAGESPEED', 'TELEGRAM_ALERTS')`),
+  ],
+);
+
+/** Spend ledger for paid providers, so the panel can show what research has cost. */
+export const providerUsage = pgTable(
+  "provider_usage",
+  {
+    id: id(),
+    orgId: varchar("org_id", { length: 30 })
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: varchar("project_id", { length: 30 }).references(() => projects.id, { onDelete: "set null" }),
+    provider: text("provider").notNull(),
+    endpoint: text("endpoint").notNull(),
+    /** In the provider's currency (DataForSEO: USD), as the provider reported it. */
+    cost: doublePrecision("cost"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("provider_usage_org_idx").on(t.orgId, t.createdAt)],
+);
+
+export const contentDocuments = pgTable(
+  "content_documents",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    targetKeyword: text("target_keyword"),
+    locale: text("locale").notNull().default("fa"),
+    /** Sanitised HTML. */
+    body: text("body").notNull().default(""),
+    score: integer("score"),
+    analysis: jsonb("analysis"),
+    url: text("url"),
+    createdById: text("created_by_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("content_documents_project_idx").on(t.projectId, t.updatedAt)],
+);
+
+/**
+ * Generated PDF reports. The file lives in `content` (bytea): the deployment
+ * has no object storage, and a 10 MB cap (enforced by a CHECK) keeps rows sane.
+ * `fileKey` is the download file name.
+ */
+export const REPORT_MAX_BYTES = 10 * 1024 * 1024;
+export const reports = pgTable(
+  "reports",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().$type<ReportKind>(),
+    runId: varchar("run_id", { length: 30 }).references(() => auditRuns.id, { onDelete: "set null" }),
+    fileKey: text("file_key").notNull(),
+    contentType: text("content_type").notNull().default("application/pdf"),
+    bytes: integer("bytes").notNull(),
+    content: bytea("content").notNull(),
+    /** {logo?: data URL, name?, color?} */
+    brand: jsonb("brand").$type<ReportBrand | null>(),
+    createdById: text("created_by_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("reports_project_idx").on(t.projectId, t.createdAt),
+    check("reports_kind_ck", sql`${t.kind} IN ('audit', 'executive', 'keywords')`),
+    check("reports_size_ck", sql`octet_length(${t.content}) <= 10485760 AND ${t.bytes} = octet_length(${t.content})`),
+  ],
+);
+
 // ---------------------------------------------------------------- relations
 
 export const projectsRelations = relations(projects, ({ many, one }) => ({
@@ -573,3 +935,64 @@ export type PlatformInfo = {
   /** ISO timestamp. */
   detectedAt: string;
 };
+
+// ---------------------------------------------------------------- phase 2 types
+
+export type KeywordDevice = "desktop" | "mobile";
+export type PositionSource = "gsc" | "dataforseo";
+export type IdeaSource = "autocomplete" | "gsc" | "dataforseo";
+export type PageSpeedStrategy = "mobile" | "desktop";
+export type ScheduleKind = "scan" | "rank" | "pagespeed" | "competitors" | "report";
+export type AlertKind = "score_drop" | "new_critical" | "rank_drop" | "page_down" | "cwv_regression" | "index_drop";
+export type AlertChannel = "in_app" | "webhook" | "telegram";
+export type IntegrationKind = "DATAFORSEO" | "PAGESPEED" | "TELEGRAM_ALERTS";
+export type ReportKind = "audit" | "executive" | "keywords";
+export type LocalizedText = { fa: string; en: string };
+export type ReportBrand = { logo?: string; name?: string; color?: string };
+
+export type HeadingSummary = {
+  counts: { h1: number; h2: number; h3: number; h4: number; h5: number; h6: number };
+  h2: string[];
+};
+
+/** Google's CWV bucket for a 75th-percentile value. */
+export type CwvCategory = "FAST" | "AVERAGE" | "SLOW";
+export type CruxMetric = { p75: number; category: CwvCategory | null };
+export type CruxFieldData = {
+  /** "url" when Google has data for this page, "origin" when only for the whole site. */
+  scope: "url" | "origin";
+  overall: CwvCategory | null;
+  lcpMs?: CruxMetric;
+  /** Unitless (CrUX reports it ×100; stored divided back). */
+  cls?: CruxMetric;
+  inpMs?: CruxMetric;
+  fcpMs?: CruxMetric;
+  ttfbMs?: CruxMetric;
+};
+export type PageSpeedOpportunity = {
+  id: string;
+  title: string;
+  /** Estimated saving, from Lighthouse. */
+  savingsMs: number | null;
+  savingsBytes: number | null;
+  score: number | null;
+};
+export type NotificationDelivery = {
+  status: "pending" | "sent" | "failed" | "skipped";
+  attempts: number;
+  error?: string | null;
+  at: string;
+};
+
+export type Keyword = typeof keywords.$inferSelect;
+export type KeywordPosition = typeof keywordPositions.$inferSelect;
+export type KeywordIdea = typeof keywordIdeas.$inferSelect;
+export type Competitor = typeof competitors.$inferSelect;
+export type CompetitorSnapshot = typeof competitorSnapshots.$inferSelect;
+export type PageSpeedRow = typeof pageSpeed.$inferSelect;
+export type Schedule = typeof schedules.$inferSelect;
+export type AlertRule = typeof alertRules.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+export type OrgIntegration = typeof orgIntegrations.$inferSelect;
+export type ContentDocument = typeof contentDocuments.$inferSelect;
+export type Report = typeof reports.$inferSelect;

@@ -23,6 +23,12 @@ import { newToken } from "./crypto.js";
 
 export const AUDIT_QUEUE = "audit-scan";
 export const FIX_QUEUE = "fix-execution";
+/** Phase 2 queues: SEO data collection and alert delivery. */
+export const RANK_QUEUE = "rank-sync";
+export const PAGESPEED_QUEUE = "pagespeed";
+export const COMPETITOR_QUEUE = "competitor-snapshot";
+export const NOTIFY_QUEUE = "notify-deliver";
+export const REPORT_QUEUE = "report-generate";
 
 export type AuditJobData = {
   runId: string;
@@ -39,6 +45,29 @@ export type FixJobData = {
   requestedBy: string;
   correlationId: string;
 };
+
+/** Who started a data job: a person (or API key) now, or a project schedule. */
+export type DataJobTrigger = "MANUAL" | "SCHEDULE";
+
+type DataJobBase = {
+  projectId: string;
+  trigger: DataJobTrigger;
+  /** User id, "api-key:<id>" or "scheduler". */
+  requestedBy: string;
+  correlationId: string;
+};
+
+export type RankJobData = DataJobBase;
+export type PageSpeedJobData = DataJobBase & {
+  /** Explicit pages to measure; absent = homepage plus the project's top pages. */
+  urls?: string[];
+};
+export type CompetitorJobData = DataJobBase & {
+  /** One competitor, or every competitor of the project when absent. */
+  competitorId?: string;
+};
+export type ReportJobData = DataJobBase & { kind: "audit" | "executive" | "keywords" };
+export type NotifyJobData = { notificationId: string; channel: "webhook" | "telegram" };
 
 /**
  * Redis key prefix for every queue. Separate deployments (or the test suite)
@@ -72,6 +101,39 @@ export const fixQueue: Queue<FixJobData> =
 if (process.env.NODE_ENV === "development") {
   globalForQueue.__auditQueue = auditQueue;
   globalForQueue.__fixQueue = fixQueue;
+}
+
+// The data queues are created on first use: the web process imports this
+// module for every route and most routes never touch them.
+type DataQueues = {
+  rank: Queue<RankJobData>;
+  pagespeed: Queue<PageSpeedJobData>;
+  competitor: Queue<CompetitorJobData>;
+  notify: Queue<NotifyJobData>;
+  report: Queue<ReportJobData>;
+};
+const globalForData = globalThis as unknown as { __dataQueues?: Partial<DataQueues> };
+const dataQueues: Partial<DataQueues> = globalForData.__dataQueues ?? {};
+if (process.env.NODE_ENV === "development") globalForData.__dataQueues = dataQueues;
+
+const DATA_QUEUE_NAMES: Record<keyof DataQueues, string> = {
+  rank: RANK_QUEUE,
+  pagespeed: PAGESPEED_QUEUE,
+  competitor: COMPETITOR_QUEUE,
+  notify: NOTIFY_QUEUE,
+  report: REPORT_QUEUE,
+};
+
+export function dataQueue<K extends keyof DataQueues>(kind: K): DataQueues[K] {
+  const existing = dataQueues[kind];
+  if (existing) return existing as DataQueues[K];
+  const queue = new Queue(DATA_QUEUE_NAMES[kind], {
+    connection: redisCommand(),
+    defaultJobOptions,
+    prefix: queuePrefix(),
+  }) as DataQueues[K];
+  dataQueues[kind] = queue;
+  return queue;
 }
 
 // BullMQ rejects a custom job id containing ":", so these use "-".
@@ -122,6 +184,67 @@ export async function enqueueFix(data: FixJobData): Promise<string> {
   return jobId;
 }
 
+export type EnqueueResult = {
+  jobId: string;
+  /** True when a job for the same project was already waiting or running, and that one stands. */
+  deduplicated: boolean;
+};
+
+/**
+ * One job per project and kind at a time. BullMQ's deduplication id holds only
+ * while that job is waiting or running, so a finished sync never blocks the
+ * next one (a fixed job id would, for as long as the finished job is kept).
+ */
+async function addDeduplicated<T extends DataJobBase>(
+  queue: Queue<T>,
+  name: string,
+  data: T,
+  dedupeId: string,
+  jobId: string,
+): Promise<EnqueueResult> {
+  const job = await withDeadline(() =>
+    // BullMQ's generic job-name typing does not follow a Queue<T> through a helper.
+    (queue as unknown as Queue).add(name, data, { jobId, deduplication: { id: dedupeId } }),
+  );
+  return { jobId: job.id ?? jobId, deduplicated: job.id !== undefined && job.id !== jobId };
+}
+
+function dataJobId(kind: string, projectId: string): string {
+  return `${kind}-${projectId}-${Date.now().toString(36)}${newToken(4)}`;
+}
+
+export function enqueueRankSync(data: RankJobData): Promise<EnqueueResult> {
+  return addDeduplicated(dataQueue("rank"), "sync", data, `rank-${data.projectId}`, dataJobId("rank", data.projectId));
+}
+
+export function enqueuePageSpeed(data: PageSpeedJobData): Promise<EnqueueResult> {
+  return addDeduplicated(dataQueue("pagespeed"), "measure", data, `psi-${data.projectId}`, dataJobId("psi", data.projectId));
+}
+
+export function enqueueCompetitors(data: CompetitorJobData): Promise<EnqueueResult> {
+  const scope = data.competitorId ?? "all";
+  return addDeduplicated(
+    dataQueue("competitor"),
+    "snapshot",
+    data,
+    `comp-${data.projectId}-${scope}`,
+    dataJobId("comp", data.projectId),
+  );
+}
+
+export function enqueueReport(data: ReportJobData): Promise<EnqueueResult> {
+  return addDeduplicated(dataQueue("report"), "generate", data, `report-${data.projectId}-${data.kind}`, dataJobId("report", data.projectId));
+}
+
+/** Delivery retries with backoff; the job id makes a repeated enqueue for the same channel a no-op. */
+export async function enqueueNotify(data: NotifyJobData): Promise<string> {
+  const jobId = `notify-${data.notificationId}-${data.channel}`;
+  await withDeadline(() =>
+    dataQueue("notify").add("deliver", data, { jobId, attempts: 4, backoff: { type: "exponential", delay: 30_000 } }),
+  );
+  return jobId;
+}
+
 export type QueueDepth = {
   waiting: number;
   active: number;
@@ -148,7 +271,7 @@ export function workerConcurrency(): number {
 }
 
 export async function closeQueues(): Promise<void> {
-  await Promise.allSettled([auditQueue.close(), fixQueue.close()]);
+  await Promise.allSettled([auditQueue.close(), fixQueue.close(), ...Object.values(dataQueues).map((q) => q.close())]);
 }
 
 export { Queue, QueueEvents };

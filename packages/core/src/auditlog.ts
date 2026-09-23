@@ -49,7 +49,27 @@ export type AuditAction =
   | "apikey.create"
   | "apikey.revoke"
   | "auth.org_switch"
-  | "report.create";
+  | "report.create"
+  | "keyword.add"
+  | "keyword.update"
+  | "keyword.archive"
+  | "keyword.delete"
+  | "keyword.research"
+  | "rank.sync"
+  | "pagespeed.run"
+  | "competitor.add"
+  | "competitor.update"
+  | "competitor.delete"
+  | "competitor.analyze"
+  | "competitor.keyword_gap"
+  | "schedule.update"
+  | "alert.create"
+  | "alert.update"
+  | "alert.delete"
+  | "alert.test"
+  | "integration.connect"
+  | "integration.disconnect"
+  | "integration.test";
 
 export async function record(input: {
   orgId: string;

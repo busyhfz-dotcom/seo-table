@@ -9,7 +9,7 @@ const hsts =
 const nextConfig = {
   reactStrictMode: true,
   // The workspace packages ship TypeScript source, so Next compiles them.
-  transpilePackages: ["@seo/core", "@seo/db", "@seo/connectors", "@seo/pipeline"],
+  transpilePackages: ["@seo/core", "@seo/db", "@seo/connectors", "@seo/pipeline", "@seo/seo-data"],
   poweredByHeader: false,
   // Loaded from node_modules at runtime instead of bundled: native bindings,
   // worker threads (pino) and undici's own dynamic requires do not survive webpack.

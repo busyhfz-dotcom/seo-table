@@ -50,6 +50,13 @@
       "when": 1790110746080,
       "tag": "0006_edge_write_target_platform",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790170489967,
+      "tag": "0007_seo_data_phase2",
+      "breakpoints": true
     }
   ]
 }

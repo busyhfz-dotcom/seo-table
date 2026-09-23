@@ -7,6 +7,7 @@ import type { Locale } from "./i18n";
 import { num } from "./format";
 import { actionLabel, connectorLabel } from "./labels";
 import { describeConnectionAction } from "./connector-messages";
+import { describeSeoDataAction } from "./seo-data-activity";
 
 export function iconForAction(action: string): string {
   if (action.startsWith("scan")) return action.includes("refused") ? "x" : "play";
@@ -87,6 +88,6 @@ export function describeAction(action: string, actorType: string, metadata: unkn
     case "apikey.revoke":
       return fa ? "کلید API لغو شد" : "API key revoked";
     default:
-      return describeConnectionAction(action, m, locale) ?? action;
+      return describeConnectionAction(action, m, locale) ?? describeSeoDataAction(action, m, locale) ?? action;
   }
 }

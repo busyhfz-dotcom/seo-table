@@ -4,7 +4,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export { schema };
-export { sql, eq, and, or, desc, asc, inArray, isNull, isNotNull, count, gte, lte, like, ilike, ne } from "drizzle-orm";
+export { sql, eq, and, or, desc, asc, inArray, isNull, isNotNull, count, gt, gte, lt, lte, like, ilike, ne } from "drizzle-orm";
 
 const globalForDb = globalThis as unknown as { __seoPool?: Pool; __seoDb?: Db };
 

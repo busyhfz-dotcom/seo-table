@@ -15,10 +15,11 @@
     "@seo/connectors": "workspace:*",
     "@seo/core": "workspace:*",
     "@seo/db": "workspace:*",
+    "@seo/pipeline": "workspace:*",
+    "@seo/seo-data": "workspace:*",
     "bullmq": "^5.34.6",
     "ioredis": "^5.4.2",
-    "tsx": "^4.19.2",
-    "@seo/pipeline": "workspace:*"
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

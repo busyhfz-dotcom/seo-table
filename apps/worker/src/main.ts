@@ -1,14 +1,20 @@
 /**
- * Worker process. Two BullMQ workers plus a tiny HTTP server for health checks,
- * because Railway needs something to probe and "is the queue draining" is the
- * question worth answering.
+ * Worker process. BullMQ workers (scans, fix executions, and the SEO data jobs:
+ * rank sync, PageSpeed, competitor snapshots, alert delivery), the schedule
+ * loop, and a tiny HTTP server for health checks, because Railway needs
+ * something to probe and "is the queue draining" is the question worth
+ * answering.
  */
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { UnrecoverableError, Worker, type Job } from "bullmq";
 import {
   AUDIT_QUEUE,
+  COMPETITOR_QUEUE,
   FIX_QUEUE,
+  NOTIFY_QUEUE,
+  PAGESPEED_QUEUE,
+  RANK_QUEUE,
   auditJobId,
   auditQueue,
   childLogger,
@@ -25,11 +31,24 @@ import {
   scanService,
   workerConcurrency,
   type AuditJobData,
+  type CompetitorJobData,
   type FixJobData,
+  type NotifyJobData,
+  type PageSpeedJobData,
+  type RankJobData,
 } from "@seo/core";
 import { closeDb, pingDb, pool } from "@seo/db";
 import { BrowserManager } from "@seo/browser";
 import { analyze, execute, isPermanentFailure, markRunFailed, runAgent } from "@seo/pipeline";
+import {
+  alertService,
+  dispatchSchedule,
+  notificationService,
+  runCompetitorJob,
+  runPageSpeedJob,
+  runRankJob,
+  scheduleService,
+} from "@seo/seo-data";
 import { browserApi } from "./browser-api.js";
 
 process.env.SERVICE_NAME ??= "seo-worker";
@@ -38,7 +57,10 @@ const log = childLogger({ component: "worker" });
 let shuttingDown = false;
 let auditWorker: Worker<AuditJobData> | undefined;
 let fixWorker: Worker<FixJobData> | undefined;
+/** Rank sync, PageSpeed, competitor snapshots and alert delivery. */
+const dataWorkers: Worker[] = [];
 let reaperTimer: NodeJS.Timeout | undefined;
+let schedulerTimer: NodeJS.Timeout | undefined;
 /** Created on the first browser request; Chromium itself starts only when a session or render needs it. */
 let browserManager: BrowserManager | undefined;
 
@@ -50,6 +72,7 @@ const SHUTDOWN_HARD_LIMIT_MS = 57_000;
 const REAP_EVERY_MS = 5 * 60_000;
 const REAP_STALE_MINUTES = 15;
 const MIGRATION_WAIT_MS = 3 * 60_000;
+const SCHEDULER_EVERY_MS = 60_000;
 /** BullMQ states in which a job will still run (or is running). */
 const ALIVE_STATES = new Set(["active", "waiting", "delayed", "prioritized", "waiting-children"]);
 
@@ -102,7 +125,11 @@ const server = createServer(async (req, res) => {
         status: ok ? "ready" : started ? "not_ready" : "starting",
         checks: { database: dbOk, redis: redisOk },
         queue: depth,
-        workers: { audit: auditWorker?.isRunning() ?? false, fix: fixWorker?.isRunning() ?? false },
+        workers: {
+          audit: auditWorker?.isRunning() ?? false,
+          fix: fixWorker?.isRunning() ?? false,
+          data: dataWorkers.length > 0 && dataWorkers.every((w) => w.isRunning()),
+        },
       }),
     );
     return;
@@ -124,7 +151,7 @@ server.listen(port, "::");
 
 // ---- graceful shutdown -----------------------------------------------------
 async function closeWorkers(): Promise<void> {
-  const workers = [auditWorker, fixWorker].filter((w): w is Worker => w !== undefined);
+  const workers = [auditWorker, fixWorker, ...dataWorkers].filter((w): w is Worker => w !== undefined);
   // close() lets in-flight jobs finish; an interrupted crawl would otherwise be
   // picked up again only after BullMQ notices the stall.
   const drained = await withTimeout(
@@ -149,6 +176,7 @@ async function shutdown(signal: string): Promise<void> {
   let code = 0;
   try {
     clearInterval(reaperTimer);
+    clearInterval(schedulerTimer);
     server.close();
     // Browser sessions end with the process; closing Chromium properly frees its
     // temp profiles instead of leaving them to the container.
@@ -301,7 +329,15 @@ auditWorker = new Worker<AuditJobData>(
       jobLog.error({ err: (err as Error).message }, "agent failed after a successful scan");
       agent = { error: (err as Error).message };
     }
-    return { runId: outcome.runId, score: outcome.score, pagesCrawled: outcome.pagesCrawled, agent };
+    // Alerts (score drop, new critical issues, homepage down) after the scan is
+    // final; a failure here is logged and never fails the scan.
+    let alerts = 0;
+    try {
+      alerts = (await alertService.evaluateAfterScan(outcome.runId)).length;
+    } catch (err) {
+      jobLog.error({ err: (err as Error).message }, "alert evaluation failed after a scan");
+    }
+    return { runId: outcome.runId, score: outcome.score, pagesCrawled: outcome.pagesCrawled, agent, alerts };
   },
   { connection: redis, concurrency: workerConcurrency(), lockDuration: 300_000, prefix: queuePrefix() },
 );
@@ -323,6 +359,47 @@ fixWorker = new Worker<FixJobData>(
   { connection: redis, concurrency: 1, lockDuration: 120_000, prefix: queuePrefix() },
 );
 
+// ---- SEO data workers ---------------------------------------------------------
+// Each job is idempotent (upserts keyed by day, dedupe keys on notifications),
+// so BullMQ's retries and a stalled job picked up again are safe.
+const dataOpts = { connection: redis, prefix: queuePrefix() };
+dataWorkers.push(
+  new Worker<RankJobData>(RANK_QUEUE, async (job) => runRankJob(job.data), { ...dataOpts, concurrency: 2, lockDuration: 300_000 }),
+  // One at a time: PageSpeed Insights quota is per key, and the key is shared.
+  new Worker<PageSpeedJobData>(PAGESPEED_QUEUE, async (job) => runPageSpeedJob(job.data), { ...dataOpts, concurrency: 1, lockDuration: 600_000 }),
+  new Worker<CompetitorJobData>(COMPETITOR_QUEUE, async (job) => runCompetitorJob(job.data), { ...dataOpts, concurrency: 1, lockDuration: 600_000 }),
+  new Worker<NotifyJobData>(
+    NOTIFY_QUEUE,
+    async (job) => {
+      const attempt = job.attemptsMade + 1;
+      return notificationService.deliver(job.data.notificationId, job.data.channel, {
+        attempt,
+        final: attempt >= (job.opts.attempts ?? 1),
+      });
+    },
+    { ...dataOpts, concurrency: 4, lockDuration: 60_000 },
+  ),
+);
+
+// ---- schedules --------------------------------------------------------------
+// A loop over the schedules table (see seo-data/schedules.ts for why this and
+// not repeatable jobs): safe with any number of workers, and restarts lose nothing.
+let ticking = false;
+async function runSchedules(): Promise<void> {
+  if (ticking || shuttingDown) return;
+  ticking = true;
+  try {
+    const dispatched = await scheduleService.tick(dispatchSchedule);
+    if (dispatched > 0) log.info({ dispatched }, "scheduled jobs dispatched");
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "schedule tick failed");
+  } finally {
+    ticking = false;
+  }
+}
+void runSchedules();
+schedulerTimer = setInterval(() => void runSchedules(), SCHEDULER_EVERY_MS);
+
 /**
  * A job can fail without its processor's catch running: BullMQ fails a job that
  * stalled too often (its worker died mid-run) with an UnrecoverableError on the
@@ -343,6 +420,7 @@ auditWorker.on("failed", (job, err) => {
 for (const [name, worker] of [
   ["audit", auditWorker],
   ["fix", fixWorker],
+  ...dataWorkers.map((w) => [w.name, w] as const),
 ] as const) {
   worker.on("completed", (job) => {
     metric(`${name}.job.completed`);
@@ -356,6 +434,6 @@ for (const [name, worker] of [
 }
 
 log.info(
-  { concurrency: workerConcurrency(), queues: [AUDIT_QUEUE, FIX_QUEUE] },
+  { concurrency: workerConcurrency(), queues: [AUDIT_QUEUE, FIX_QUEUE, ...dataWorkers.map((w) => w.name)] },
   "worker ready",
 );

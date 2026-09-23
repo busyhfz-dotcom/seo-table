@@ -129,7 +129,35 @@ function googleFailure(status: number, text: string, what: string): ConnectorErr
   return new ConnectorError(reason, `${what} failed (HTTP ${status}): ${text.slice(0, 200)}`);
 }
 
+/**
+ * A raw Search Analytics request. Filters follow the API: country is ISO 3166-1
+ * alpha-3 in lower case ("irn"), device is DESKTOP | MOBILE | TABLET, and
+ * `includingRegex` takes RE2 syntax. Filters in one group are ANDed.
+ */
+export type SearchAnalyticsRequest = {
+  start: Date;
+  end: Date;
+  dimensions: Array<"query" | "page" | "date" | "country" | "device">;
+  filters?: Array<{
+    dimension: "query" | "page" | "country" | "device";
+    operator: "equals" | "notEquals" | "contains" | "notContains" | "includingRegex" | "excludingRegex";
+    expression: string;
+  }>;
+  /** Total rows wanted; paged 25,000 at a time. Default 25,000. */
+  limit?: number;
+};
+
+export type SearchAnalyticsRow = {
+  keys: string[];
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+};
+
 export type SearchConsoleClient = Connector & {
+  /** Search Analytics with dimensions and filters of the caller's choosing. */
+  searchAnalytics: (req: SearchAnalyticsRequest) => Promise<SearchAnalyticsRow[]>;
   queries: (range: { start: Date; end: Date }, limit?: number) => Promise<QueryRow[]>;
   opportunities: (range: { start: Date; end: Date }) => Promise<Opportunity[]>;
   indexedPages: (range: { start: Date; end: Date }, limit?: number) => Promise<Set<string>>;
@@ -189,6 +217,7 @@ export function searchConsole(creds: SearchConsoleCredentials): SearchConsoleCli
     dimensions: string[],
     limit: number,
     onRow: (row: { keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }) => void,
+    filters?: SearchAnalyticsRequest["filters"],
   ): Promise<void> {
     const headers = await auth(creds);
     let startRow = 0;
@@ -206,6 +235,7 @@ export function searchConsole(creds: SearchConsoleCredentials): SearchConsoleCli
           rowLimit,
           startRow,
           dataState: "all",
+          ...(filters?.length ? { dimensionFilterGroups: [{ groupType: "and", filters }] } : {}),
         }),
         timeoutMs: 40_000,
       });
@@ -219,6 +249,25 @@ export function searchConsole(creds: SearchConsoleCredentials): SearchConsoleCli
       // A short page is the last one.
       if (batch.length < rowLimit) break;
     }
+  }
+
+  async function searchAnalytics(req: SearchAnalyticsRequest): Promise<SearchAnalyticsRow[]> {
+    const rows: SearchAnalyticsRow[] = [];
+    await queryPages(
+      { start: req.start, end: req.end },
+      req.dimensions,
+      req.limit ?? PAGE_ROWS,
+      (row) =>
+        rows.push({
+          keys: row.keys ?? [],
+          clicks: row.clicks ?? 0,
+          impressions: row.impressions ?? 0,
+          ctr: row.ctr ?? 0,
+          position: row.position ?? 0,
+        }),
+      req.filters,
+    );
+    return rows;
   }
 
   async function queries(range: { start: Date; end: Date }, limit = 1000): Promise<QueryRow[]> {
@@ -335,7 +384,7 @@ export function searchConsole(creds: SearchConsoleCredentials): SearchConsoleCli
     };
   }
 
-  return { kind: "SEARCH_CONSOLE", check, capabilities, queries, opportunities, indexedPages, submitSitemap, inspectUrl };
+  return { kind: "SEARCH_CONSOLE", check, capabilities, searchAnalytics, queries, opportunities, indexedPages, submitSitemap, inspectUrl };
 }
 
 /** Explainable buckets — each one names the actual shape of the gap. */

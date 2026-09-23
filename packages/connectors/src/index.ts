@@ -22,6 +22,8 @@ export {
   type SearchConsoleCredentials,
   type Opportunity,
   type QueryRow,
+  type SearchAnalyticsRequest,
+  type SearchAnalyticsRow,
   type SuggestedActionCode,
   type UrlInspection,
 } from "./search-console.js";

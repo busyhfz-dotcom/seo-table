@@ -53,6 +53,15 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).optional(),
 
   /**
+   * PageSpeed Insights works without a key at low volume; a key (Google Cloud,
+   * "PageSpeed Insights API") raises the quota. An organization can also store
+   * its own under Settings → Integrations, which takes precedence.
+   */
+  PAGESPEED_API_KEY: z.string().optional(),
+  /** Pages per project measured by a PageSpeed run (each is two API calls: mobile and desktop). */
+  PAGESPEED_MAX_URLS: z.coerce.number().int().min(1).max(50).default(10),
+
+  /**
    * The in-panel browser (worker). Each session is a Chromium context, roughly
    * 100–300 MB; 0 turns the browser off. A person has at most one session.
    */

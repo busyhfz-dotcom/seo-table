@@ -21,11 +21,12 @@
     "fixture": "tsx scripts/fixture-server.ts"
   },
   "devDependencies": {
+    "@seo/browser": "workspace:*",
     "@seo/connectors": "workspace:*",
     "@seo/core": "workspace:*",
     "@seo/db": "workspace:*",
     "@seo/pipeline": "workspace:*",
-    "@seo/browser": "workspace:*",
+    "@seo/seo-data": "workspace:*",
     "@types/node": "^22.10.2",
     "miniflare": "4.20260730.0",
     "playwright": "1.56.1",
