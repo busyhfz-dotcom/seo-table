@@ -26,7 +26,7 @@ const REASONS: Record<string, LocalizedText> = {
     en: "The API quota is used up. An API key of your own raises it.",
   },
   location_unsupported: {
-    fa: "این سرویس برای این کشور/زبان داده ندارد (مثلاً Google Ads برای ایران حجم جست‌وجو ارائه نمی‌دهد).",
+    fa: "این سرویس برای این کشور/زبان داده ندارد (مثلاً سامانه‌ی تبلیغات گوگل برای ایران حجم جست‌وجو ارائه نمی‌دهد).",
     en: "The provider has no data for this country/language (Google Ads, for example, does not serve Iran).",
   },
   invalid_request: { fa: "درخواست توسط سرویس پذیرفته نشد.", en: "The provider refused the request." },
@@ -47,7 +47,7 @@ const REASONS: Record<string, LocalizedText> = {
     en: "That address points to a private network and is not allowed.",
   },
   webhook_rejected: {
-    fa: "نشانی وب‌هوک پیام را نپذیرفت (پاسخ غیر ۲xx).",
+    fa: "نشانی وب‌هوک پیام را نپذیرفت (پاسخ موفق برنگرداند).",
     en: "The webhook endpoint did not accept the message (non-2xx answer).",
   },
   network_error: { fa: "سرویس در دسترس نبود.", en: "The service could not be reached." },

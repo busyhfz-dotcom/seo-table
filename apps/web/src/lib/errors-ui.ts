@@ -108,7 +108,13 @@ export function apiErrorMessage(
   if (code === "CONNECTOR_NOT_CONNECTED" && typeof kind === "string" && NOT_CONNECTED[kind]) {
     text = NOT_CONNECTED[kind]![locale];
   }
-  const reason = reasonText(locale, typeof failure.details?.reason === "string" ? failure.details.reason : null);
+  // A data provider's refusal (DataForSEO, PageSpeed, Telegram) arrives already
+  // worded in both languages; a connector's reason is worded here.
+  const given = failure.details?.text as Partial<Pair> | undefined;
+  const reason =
+    given && typeof given[locale] === "string"
+      ? given[locale]
+      : reasonText(locale, typeof failure.details?.reason === "string" ? failure.details.reason : null);
   if (reason) text = `${text} ${reason}`;
   const retry = Number(failure.details?.retryAfterSeconds);
   if (code === "RATE_LIMITED" && Number.isFinite(retry) && retry > 0) {

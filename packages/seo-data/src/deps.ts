@@ -27,8 +27,19 @@ export const defaultDeps: Deps = {
   pageSpeed: ({ apiKey }) => pageSpeedInsights({ apiKey }),
   telegram: (creds) => telegram(creds),
   now: () => new Date(),
-  competitorUrl: (domain) => `https://${domain}/`,
+  competitorUrl: (domain) => localCompetitorUrl(domain) ?? `https://${domain}/`,
 };
+
+/**
+ * Local development only: with ALLOW_PRIVATE_NETWORK=1 (never set in
+ * production), COMPETITOR_URL_TEMPLATE (e.g. "http://127.0.0.1:4555/" or
+ * "http://{domain}:8080/") points competitor sampling at a site on this
+ * machine, which a bare stored domain fetched over https cannot reach.
+ */
+function localCompetitorUrl(domain: string): string | null {
+  const template = process.env.ALLOW_PRIVATE_NETWORK === "1" ? process.env.COMPETITOR_URL_TEMPLATE : undefined;
+  return template ? template.replaceAll("{domain}", domain) : null;
+}
 
 export function withDeps(partial: Partial<Deps> = {}): Deps {
   return { ...defaultDeps, ...partial };

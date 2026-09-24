@@ -10,10 +10,13 @@ import { describeAction } from "../../../lib/activity";
 import { usersByIds } from "../../../lib/views";
 import { describePolicy, permissionMatrix, can, type Permission } from "@seo/core";
 import { ApiKeys } from "./api-keys";
+import { Integrations } from "./integrations";
+import { INTEGRATIONS } from "./integrations-strings";
+import { COMMON } from "../../../lib/common-strings";
 
 export const dynamic = "force-dynamic";
 
-type Tab = "general" | "team" | "safety" | "keys" | "log";
+type Tab = "general" | "team" | "safety" | "keys" | "integrations" | "log";
 
 const SHOWN_PERMISSIONS: Permission[] = [
   "project:read",
@@ -32,7 +35,7 @@ export default async function SettingsPage({
 }) {
   const params = await searchParams;
   const { t, locale, session, project } = await pageContext();
-  const tab: Tab = (["general", "team", "safety", "keys", "log"] as const).includes(params.tab as Tab)
+  const tab: Tab = (["general", "team", "safety", "keys", "integrations", "log"] as const).includes(params.tab as Tab)
     ? (params.tab as Tab)
     : "general";
 
@@ -43,13 +46,14 @@ export default async function SettingsPage({
     <>
       <TopBar title={t("settings")} />
       <div className="view">
-        <div className="seg" role="group" style={{ alignSelf: "flex-start" }}>
+        <div className="seg scroll" role="group" style={{ alignSelf: "flex-start" }}>
           {(
             [
               ["general", t("s_general")],
               ["team", t("s_team")],
               ["safety", t("s_safety")],
               ["keys", t("s_keys")],
+              ["integrations", t("s_integrations")],
               ["log", t("s_log")],
             ] as const
           ).map(([key, label]) => (
@@ -58,6 +62,15 @@ export default async function SettingsPage({
             </Link>
           ))}
         </div>
+
+        {tab === "integrations" &&
+          (can(session.role, "integration:manage") ? (
+            <Integrations s={INTEGRATIONS[locale]} c={COMMON[locale]} locale={locale} />
+          ) : (
+            <Note tone="lock" icon="lock">
+              {INTEGRATIONS[locale].owner_only}
+            </Note>
+          ))}
 
         {tab === "general" && (
           <Card title={t("s_general")}>

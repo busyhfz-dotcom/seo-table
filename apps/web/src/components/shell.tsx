@@ -1,6 +1,7 @@
 import { pageContext } from "../lib/page";
 import { userOrgs } from "../lib/auth";
 import { OrgSwitcher } from "./org-switcher";
+import { Bell } from "./notifications";
 import { NavLinks, NavStateProvider, NavSync, type NavCounts, type NavGroup } from "./nav";
 import type { Locale, T } from "../lib/i18n";
 
@@ -9,37 +10,55 @@ export type { NavCounts } from "./nav";
 const GROUPS: Array<{ group: string; items: Array<{ href: string; key: string; icon: string; count?: keyof NavCounts; orgWide?: boolean }> }> =
   [
     {
-      group: "nav_setup",
-      items: [
-        { href: "/onboarding", key: "onboarding", icon: "rocket" },
-        { href: "/connect", key: "connect_site", icon: "link" },
-      ],
-    },
-    {
-      group: "nav_analyze",
+      group: "nav_overview",
       items: [
         { href: "/", key: "dashboard", icon: "dash" },
         { href: "/projects", key: "projects", icon: "folder", count: "projects", orgWide: true },
+      ],
+    },
+    {
+      group: "nav_health",
+      items: [
         { href: "/audit", key: "audit", icon: "pulse" },
         { href: "/issues", key: "issues", icon: "alert", count: "issues" },
+        { href: "/fixes", key: "fixes", icon: "wand", count: "fixes" },
+        { href: "/approvals", key: "approvals", icon: "shield", count: "approvals" },
+      ],
+    },
+    {
+      group: "nav_growth",
+      items: [
+        { href: "/keywords", key: "keywords", icon: "trend" },
+        { href: "/content", key: "content", icon: "pen" },
+        { href: "/competitors", key: "competitors", icon: "users" },
+        { href: "/pagespeed", key: "pagespeed", icon: "gauge" },
+      ],
+    },
+    {
+      group: "nav_technical",
+      items: [
+        { href: "/tools", key: "tools", icon: "code" },
         { href: "/browser", key: "browser", icon: "browser" },
       ],
     },
     {
-      group: "nav_act",
+      group: "nav_connect",
       items: [
-        { href: "/fixes", key: "fixes", icon: "wand", count: "fixes" },
-        { href: "/approvals", key: "approvals", icon: "shield", count: "approvals" },
-        { href: "/content", key: "content", icon: "bulb" },
+        { href: "/connect", key: "connect_site", icon: "link" },
+        { href: "/connectors", key: "connectors", icon: "plug" },
+        { href: "/onboarding", key: "onboarding", icon: "rocket" },
+      ],
+    },
+    {
+      group: "nav_monitor",
+      items: [
+        { href: "/reports", key: "reports", icon: "doc" },
+        { href: "/alerts", key: "alerts", icon: "bell" },
       ],
     },
     {
       group: "nav_system",
-      items: [
-        { href: "/connectors", key: "connectors", icon: "plug" },
-        { href: "/reports", key: "reports", icon: "doc" },
-        { href: "/settings", key: "settings", icon: "gear", orgWide: true },
-      ],
+      items: [{ href: "/settings", key: "settings", icon: "gear", orgWide: true }],
     },
   ];
 
@@ -119,6 +138,19 @@ export async function TopBar({ title, right }: { title: string; right?: React.Re
           label={t("organization")}
         />
       )}
+      <Bell
+        locale={locale}
+        alertsHref={requestedProjectId ? `/alerts?project=${encodeURIComponent(requestedProjectId)}` : "/alerts"}
+        s={{
+          title: t("notifications"),
+          markAll: t("bell_mark_all"),
+          viewAll: t("bell_view_all"),
+          empty: t("bell_empty"),
+          markRead: t("bell_mark_read"),
+          open: t("bell_open"),
+          unread: t("bell_unread"),
+        }}
+      />
       <LanguageSwitch locale={locale} here={here} label={t("language")} />
       <form action="/api/auth/logout" method="post">
         <button className="btn ghost sm" type="submit">

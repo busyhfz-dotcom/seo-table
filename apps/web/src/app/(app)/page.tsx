@@ -9,6 +9,7 @@ import { dateTime, duration, num, relative } from "../../lib/format";
 import { describeAction, iconForAction } from "../../lib/activity";
 import { runErrorLabel } from "../../lib/labels";
 import { ScanButton } from "./scan-button";
+import { GrowthCards } from "./growth-cards";
 
 export const dynamic = "force-dynamic";
 
@@ -233,6 +234,8 @@ export default async function DashboardPage() {
             )}
           </Card>
         </div>
+
+        <GrowthCards projectId={data.project.id} orgId={session.orgId} href={href} />
 
         <div className="grid g2">
           <Card title={t("health")}>

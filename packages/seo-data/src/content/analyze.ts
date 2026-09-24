@@ -224,7 +224,7 @@ export function analyzeContent(input: AnalysisInput, ctx: AnalysisContext = EMPT
       status: keyword.inMetaTitle ? "pass" : "fail",
       message: keyword.inMetaTitle
         ? t("کلمهٔ کلیدی در عنوان سئو آمده است.", "The keyword is in the SEO title.")
-        : t("کلمهٔ کلیدی را در عنوان سئو (title) بیاورید، ترجیحاً در ابتدای آن.", "Put the keyword in the SEO title, ideally near the start."),
+        : t("کلمهٔ کلیدی را در عنوان سئو بیاورید، ترجیحاً در ابتدای آن.", "Put the keyword in the SEO title, ideally near the start."),
     });
     add({
       id: "keyword_in_title",
@@ -262,7 +262,7 @@ export function analyzeContent(input: AnalysisInput, ctx: AnalysisContext = EMPT
       weight: 5,
       status: !metaDescription ? "fail" : keyword.inMetaDescription ? "pass" : "warn",
       message: !metaDescription
-        ? t("توضیحات متا (meta description) نوشته نشده است.", "There is no meta description.")
+        ? t("توضیحات متا نوشته نشده است.", "There is no meta description.")
         : keyword.inMetaDescription
           ? t("کلمهٔ کلیدی در توضیحات متا آمده است؛ گوگل آن را در نتایج پررنگ می‌کند.", "The keyword is in the meta description; Google bolds it in results.")
           : t("کلمهٔ کلیدی را در توضیحات متا بیاورید.", "Use the keyword in the meta description."),
@@ -382,8 +382,8 @@ export function analyzeContent(input: AnalysisInput, ctx: AnalysisContext = EMPT
       data: { fleschReadingEase: flesch, avgSentenceWords },
       message:
         flesch! >= 60
-          ? t(`خوانایی (Flesch) ${flesch}: روان.`, `Flesch reading ease ${flesch}: plain English.`)
-          : t(`خوانایی (Flesch) ${flesch}: دشوار. جمله‌ها و واژه‌ها را کوتاه‌تر کنید.`, `Flesch reading ease ${flesch}: hard to read. Use shorter sentences and words.`),
+          ? t(`سهولت خواندن (شاخص فلش) ${flesch}: روان.`, `Flesch reading ease ${flesch}: plain English.`)
+          : t(`سهولت خواندن (شاخص فلش) ${flesch}: دشوار. جمله‌ها و واژه‌ها را کوتاه‌تر کنید.`, `Flesch reading ease ${flesch}: hard to read. Use shorter sentences and words.`),
     });
   } else {
     add({

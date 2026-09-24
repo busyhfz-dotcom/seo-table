@@ -88,3 +88,36 @@ export function pathOf(url: string): string {
     return url;
   }
 }
+
+/** A calendar day ("2026-09-23" or an ISO instant) as a short label: Jalali in Persian. */
+export function shortDate(value: string | Date | null | undefined, locale: Locale): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00Z` : value) : value;
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(locale === "fa" ? "fa-IR-u-ca-persian" : "en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/** A day with its year, for ranges ("from … to …"). */
+export function longDate(value: string | Date | null | undefined, locale: Locale): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00Z` : value) : value;
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(locale === "fa" ? "fa-IR-u-ca-persian" : "en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/** Milliseconds as seconds with one decimal ("2.4 s" / "۲٫۴ ثانیه"). */
+export function seconds(ms: number | null | undefined, locale: Locale): string {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return "—";
+  const v = (ms / 1000).toLocaleString(locale === "fa" ? "fa-IR" : "en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return locale === "fa" ? `${v} ثانیه` : `${v} s`;
+}
+
+/** Bytes as KB/MB in the reader's digits. */
+export function bytes(value: number | null | undefined, locale: Locale): string {
+  if (value === null || value === undefined) return "—";
+  const fa = locale === "fa";
+  const n = (v: number, d: number) => v.toLocaleString(fa ? "fa-IR" : "en-US", { maximumFractionDigits: d });
+  if (value < 1024) return fa ? `${n(value, 0)} بایت` : `${n(value, 0)} B`;
+  if (value < 1024 * 1024) return fa ? `${n(value / 1024, 1)} کیلوبایت` : `${n(value / 1024, 1)} KB`;
+  return fa ? `${n(value / 1024 / 1024, 1)} مگابایت` : `${n(value / 1024 / 1024, 1)} MB`;
+}

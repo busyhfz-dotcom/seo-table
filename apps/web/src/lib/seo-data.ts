@@ -9,6 +9,29 @@ import { ProviderError, integrations, reasonText } from "@seo/seo-data";
 import { getProject } from "./queries";
 import type { Session } from "./auth";
 
+/**
+ * A page address passed in the query (?url=). Next.js rewrites a loopback host
+ * it finds in a request's address to "localhost" — including one inside the
+ * query — so a page of a site served from this machine (127.0.0.1, only ever
+ * with ALLOW_PRIVATE_NETWORK in development) arrives under the wrong host; it
+ * gets the project's own host back. Any other address is returned untouched.
+ */
+export function pageUrlParam(req: NextRequest, project: Pick<Project, "baseUrl">, name = "url"): string | null {
+  const value = req.nextUrl.searchParams.get(name);
+  if (!value) return value;
+  try {
+    const url = new URL(value);
+    const base = new URL(project.baseUrl);
+    if (url.hostname === "localhost" && /^(127\.\d+\.\d+\.\d+|\[::1\])$/.test(base.hostname)) {
+      url.hostname = base.hostname;
+      return url.toString();
+    }
+  } catch {
+    /* not an absolute URL: the route validates it */
+  }
+  return value;
+}
+
 /** The project named in the path, if it belongs to the caller's organization; 404 otherwise. */
 export async function projectFor(session: Session, projectId: string | undefined): Promise<Project> {
   const project = projectId ? await getProject(session.orgId, projectId) : null;

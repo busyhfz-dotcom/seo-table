@@ -191,9 +191,13 @@ export function Empty({ children, icon = "box" }: { children: ReactNode; icon?: 
  */
 export function Diff({ before, after }: { before: string | null; after: string | null }) {
   const line = (value: string | null) => {
-    const text = readableUrl(value) ?? "∅";
+    const full = readableUrl(value) ?? "∅";
+    // Whole documents (a robots.txt, a sitemap, JSON-LD) are changes too; the
+    // list shows their start, the fix preview and the file itself the rest.
+    const text = full.length > 700 ? `${full.slice(0, 700)} …` : full;
+    const multiline = text.includes("\n");
     return (
-      <span dir="auto" translate="no" className={looksLikeUrl(text) ? "url" : undefined}>
+      <span dir="auto" translate="no" className={looksLikeUrl(text) ? "url" : multiline ? "doc-lines" : undefined}>
         {text}
       </span>
     );

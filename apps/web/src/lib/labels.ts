@@ -200,6 +200,9 @@ export const ACTION_LABELS: Record<string, Pair> = {
   INTERNAL_LINK: { fa: "لینک داخلی", en: "Internal link" },
   ALT_TEXT: { fa: "متن جانشین تصویر", en: "Image alt text" },
   SITEMAP_ADD: { fa: "افزودن به نقشه‌ی سایت", en: "Add to sitemap" },
+  SCHEMA_MARKUP: { fa: "نشانه‌گذاری ساختاریافته", en: "Structured data" },
+  ROBOTS_TXT: { fa: "فایل robots.txt", en: "robots.txt file" },
+  SITEMAP_XML: { fa: "فایل نقشه‌ی سایت", en: "Sitemap file" },
 };
 
 /** What each fix does, in the reader's language. Numbers live in the UI, not here. */
@@ -215,6 +218,9 @@ export const FIX_TITLES: Record<string, Pair> = {
   INTERNAL_LINK: { fa: "از یک صفحه‌ی والد به این صفحه لینک بده", en: "Link to the page from a relevant parent" },
   ALT_TEXT: { fa: "توصیف تصویر", en: "Describe the image" },
   SITEMAP_ADD: { fa: "افزودن صفحه به نقشه‌ی سایت", en: "Add the page to the sitemap" },
+  SCHEMA_MARKUP: { fa: "افزودن نشانه‌گذاری ساختاریافته (JSON-LD) به صفحه", en: "Add structured data (JSON-LD) to the page" },
+  ROBOTS_TXT: { fa: "جایگزینی فایل robots.txt", en: "Replace the robots.txt file" },
+  SITEMAP_XML: { fa: "انتشار نقشه‌ی سایت ساخته‌شده از اسکن", en: "Publish the sitemap built from the scan" },
 };
 
 export const FIX_WHY: Record<string, Pair> = {
@@ -229,6 +235,18 @@ export const FIX_WHY: Record<string, Pair> = {
   INTERNAL_LINK: { fa: "خزنده‌ها از طریق لینک به صفحات می‌رسند؛ صفحه‌ی یتیم کشف نمی‌شود.", en: "Crawlers reach pages through links; an orphan is barely discoverable." },
   ALT_TEXT: { fa: "بدون alt، صفحه‌خوان و جستجوی تصویر چیزی برای کار ندارند.", en: "Without alt, screen readers and image search have nothing to work with." },
   SITEMAP_ADD: { fa: "صفحه قابل ایندکس است اما به خزنده‌ها معرفی نشده.", en: "The page is indexable but crawlers are not told about it." },
+  SCHEMA_MARKUP: {
+    fa: "نشانه‌گذاری ساختاریافته به گوگل می‌گوید صفحه درباره‌ی چیست و آن را برای نتایج غنی (ستاره، قیمت، پرسش‌ها) واجد شرایط می‌کند.",
+    en: "Structured data tells Google what the page is about and makes it eligible for rich results (ratings, prices, FAQs).",
+  },
+  ROBOTS_TXT: {
+    fa: "robots.txt تعیین می‌کند خزنده‌ها کجا بروند؛ یک خط اشتباه می‌تواند صفحه‌های مهم را از گوگل پنهان کند، پس پیش از اعمال بازبینی می‌شود.",
+    en: "robots.txt decides where crawlers may go; one wrong line can hide important pages from Google, so it is reviewed before it goes live.",
+  },
+  SITEMAP_XML: {
+    fa: "نقشه‌ی سایت فقط صفحه‌های سالم و قابل ایندکس را به موتورهای جستجو معرفی می‌کند تا زودتر و کامل‌تر خزیده شوند.",
+    en: "The sitemap lists only healthy, indexable pages so search engines crawl them sooner and more completely.",
+  },
 };
 
 export function actionLabel(action: string, locale: Locale): string {
@@ -360,6 +378,8 @@ export function targetTypeLabel(type: string | null, locale: Locale): string {
         schedule: { fa: "زمان‌بندی", en: "Schedule" },
         alert_rule: { fa: "قانون هشدار", en: "Alert rule" },
         integration: { fa: "سرویس", en: "Integration" },
+        content_document: { fa: "سند محتوا", en: "Content document" },
+        report: { fa: "گزارش", en: "Report" },
       },
       type,
       locale,

@@ -5,13 +5,17 @@ import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
 import { dashboard, listIssues } from "../../../lib/queries";
 import { dateTime, duration, num } from "../../../lib/format";
+import { COMMON } from "../../../lib/common-strings";
+import { can } from "@seo/core";
+import { REPORTS } from "./strings";
+import { ReportsScreen } from "./screen";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Reports are generated from the same scan data, live. There is no separate
- * reports table to drift out of date: what you see is the current state of the
- * latest run, and the CSV endpoint exports exactly these rows.
+ * Reports: branded PDF reports built by the worker (audit, executive,
+ * keywords), and below them the live state of the latest run, which the CSV
+ * endpoint exports row for row.
  */
 export default async function ReportsPage() {
   const { t, locale, session, project } = await pageContext();
@@ -49,6 +53,18 @@ export default async function ReportsPage() {
       />
 
       <div className="view">
+        <ReportsScreen
+          s={REPORTS[locale]}
+          c={COMMON[locale]}
+          ctx={{
+            projectId: project.id,
+            locale,
+            canWrite: can(session.role, "report:write"),
+            canBrand: can(session.role, "project:write"),
+          }}
+        />
+
+        <h2 className="section-h">{REPORTS[locale].live_title}</h2>
         <Note icon="info">{t("reports_note")}</Note>
 
         <Card title={locale === "fa" ? "خلاصه وضعیت" : "Status summary"} sub={<UserText>{project.name}</UserText>}>
