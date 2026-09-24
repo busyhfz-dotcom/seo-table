@@ -82,6 +82,13 @@ export const fixActionEnum = pgEnum("fix_action", [
   "SCHEMA_MARKUP",
   "ROBOTS_TXT",
   "SITEMAP_XML",
+  // 0009: social profiles (Instagram, Telegram). What people read about the
+  // page or channel, and posts published in its name: always a person's call.
+  "SOCIAL_PROFILE_NAME",
+  "SOCIAL_BIO",
+  "SOCIAL_TITLE",
+  "SOCIAL_DESCRIPTION",
+  "SOCIAL_POST",
 ]);
 export const fixStatusEnum = pgEnum("fix_status", [
   "DRAFT",
@@ -101,6 +108,9 @@ export const connectorKindEnum = pgEnum("connector_kind", [
   "INSTAGRAM",
   "YOUTUBE",
   "CLOUDFLARE",
+  // 0009: a Telegram channel managed through a bot; the fix executor writes
+  // channel title/description through it and rollback must use it too.
+  "TELEGRAM",
 ]);
 export const connectorStatusEnum = pgEnum("connector_status", [
   "NOT_CONNECTED",
@@ -203,11 +213,17 @@ export const projects = pgTable(
     writeTarget: text("write_target").$type<WriteTarget>(),
     /** Last platform detection (CMS, SEO plugin, CDN); null until first detected. */
     platform: jsonb("platform").$type<PlatformInfo>(),
+    /**
+     * What the project is about (0009). A social project's base_url is its
+     * public profile address, kept for display only: nothing crawls it.
+     */
+    kind: text("kind").notNull().default("WEBSITE").$type<ProjectKind>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("projects_org_idx").on(t.orgId),
     check("projects_write_target_ck", sql`${t.writeTarget} IS NULL OR ${t.writeTarget} IN ('WORDPRESS', 'CLOUDFLARE')`),
+    check("projects_kind_ck", sql`${t.kind} IN ('WEBSITE', 'INSTAGRAM', 'TELEGRAM')`),
   ],
 );
 
@@ -736,7 +752,7 @@ export const schedules = pgTable(
   (t) => [
     uniqueIndex("schedules_project_kind_uq").on(t.projectId, t.kind),
     index("schedules_due_idx").on(t.enabled, t.nextRunAt),
-    check("schedules_kind_ck", sql`${t.kind} IN ('scan', 'rank', 'pagespeed', 'competitors', 'report')`),
+    check("schedules_kind_ck", sql`${t.kind} IN ('scan', 'rank', 'pagespeed', 'competitors', 'report', 'social_sync')`),
   ],
 );
 
@@ -764,7 +780,7 @@ export const alertRules = pgTable(
     index("alert_rules_project_idx").on(t.projectId, t.kind),
     check(
       "alert_rules_kind_ck",
-      sql`${t.kind} IN ('score_drop', 'new_critical', 'rank_drop', 'page_down', 'cwv_regression', 'index_drop')`,
+      sql`${t.kind} IN ('score_drop', 'new_critical', 'rank_drop', 'page_down', 'cwv_regression', 'index_drop', 'follower_drop', 'engagement_drop', 'token_expiring', 'publish_failed')`,
     ),
     check("alert_rules_channels_ck", sql`${t.channels} <@ ARRAY['in_app', 'webhook', 'telegram']::text[]`),
   ],
@@ -903,6 +919,185 @@ export const reports = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------- 0009: social profiles
+//
+// An Instagram page or a Telegram channel is a project of its own kind. What
+// the platforms report is stored with its source ('api' = the platform's own
+// API with the owner's authorization, 'public_preview' = Telegram's public web
+// preview t.me/s/<channel>); nothing here is estimated or filled in.
+
+export const socialAccounts = pgTable(
+  "social_accounts",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .unique()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull().$type<SocialPlatform>(),
+    /** Instagram user id (Instagram Login) or Telegram chat id ("-100…"). */
+    externalId: text("external_id"),
+    username: text("username"),
+    displayName: text("display_name"),
+    /** Instagram biography or Telegram channel description. */
+    bio: text("bio"),
+    /** Instagram profile website; Telegram has none (links live in the description). */
+    website: text("website"),
+    /** Platform facts: picture, account type, bot identity and rights, pinned message, webhook mode. */
+    profile: jsonb("profile").notNull().default(sql`'{}'::jsonb`).$type<SocialProfile>(),
+    /** What the owner wants to be found for, CTA and link; drives the audit's suggestions. */
+    settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`).$type<SocialSettings>(),
+    followers: integer("followers"),
+    following: integer("following"),
+    mediaCount: integer("media_count"),
+    // Instagram access token or Telegram bot token, AES-256-GCM like connectors.
+    secretCipher: text("secret_cipher"),
+    secretIv: text("secret_iv"),
+    secretTag: text("secret_tag"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    tokenRefreshedAt: timestamp("token_refreshed_at", { withTimezone: true }),
+    scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
+    status: connectorStatusEnum("status").notNull().default("NOT_CONNECTED"),
+    lastError: text("last_error"),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    connectedById: text("connected_by_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("social_accounts_external_idx").on(t.platform, t.externalId),
+    check("social_accounts_platform_ck", sql`${t.platform} IN ('INSTAGRAM', 'TELEGRAM')`),
+  ],
+);
+
+export const socialPosts = pgTable(
+  "social_posts",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull().$type<SocialPlatform>(),
+    /** Instagram media id, or the Telegram message id. */
+    externalId: text("external_id").notNull(),
+    permalink: text("permalink"),
+    type: text("type").notNull().$type<SocialPostType>(),
+    caption: text("caption"),
+    mediaUrls: text("media_urls").array().notNull().default(sql`'{}'::text[]`),
+    /** Per image, in media order; null entries = no alt text. Empty when the API does not report it. */
+    altTexts: text("alt_texts").array(),
+    hashtags: text("hashtags").array().notNull().default(sql`'{}'::text[]`),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    /** {likes, comments, saves, shares, reach, views, interactions}; absent keys = not reported. */
+    metrics: jsonb("metrics").notNull().default(sql`'{}'::jsonb`).$type<SocialPostMetrics>(),
+    metricsAt: timestamp("metrics_at", { withTimezone: true }),
+    /** {formatted, links, lineBreaks, length}: what the text looks like, for the audit. */
+    features: jsonb("features").notNull().default(sql`'{}'::jsonb`).$type<SocialPostFeatures>(),
+    source: text("source").notNull().$type<SocialSource>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("social_posts_project_external_uq").on(t.projectId, t.externalId),
+    index("social_posts_project_published_idx").on(t.projectId, t.publishedAt),
+    check("social_posts_source_ck", sql`${t.source} IN ('api', 'public_preview')`),
+  ],
+);
+
+export const socialMetricsDaily = pgTable(
+  "social_metrics_daily",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    followers: integer("followers"),
+    reach: integer("reach"),
+    views: integer("views"),
+    profileViews: integer("profile_views"),
+    /** Interactions that day (Instagram total_interactions). */
+    engagement: integer("engagement"),
+    source: text("source").notNull().$type<SocialSource>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("social_metrics_daily_uq").on(t.projectId, t.date, t.source),
+    check("social_metrics_daily_source_ck", sql`${t.source} IN ('api', 'public_preview')`),
+  ],
+);
+
+export const socialCompetitors = pgTable(
+  "social_competitors",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull().$type<SocialPlatform>(),
+    /** Without the "@", lower case. */
+    username: text("username").notNull(),
+    /** The latest public snapshot, or null until one was taken. */
+    snapshot: jsonb("snapshot").$type<SocialCompetitorSnapshot | null>(),
+    /** ok | unsupported | not_found | error — why snapshot is (still) empty. */
+    status: text("status").notNull().default("pending"),
+    lastError: text("last_error"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("social_competitors_uq").on(t.projectId, t.username)],
+);
+
+/**
+ * Posts planned for a profile. Publishing in the owner's name needs a person's
+ * approval, which the database enforces: a post cannot be scheduled, publishing,
+ * published or failed without the approver recorded (social_posts_decided_ck).
+ */
+export const scheduledPosts = pgTable(
+  "scheduled_posts",
+  {
+    id: id(),
+    projectId: varchar("project_id", { length: 30 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull().$type<SocialPlatform>(),
+    status: text("status").notNull().default("draft").$type<ScheduledPostStatus>(),
+    /** When to publish (UTC); null = as soon as approved. */
+    publishAt: timestamp("publish_at", { withTimezone: true }),
+    payload: jsonb("payload").notNull().$type<ScheduledPostPayload>(),
+    requestedBy: text("requested_by"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
+    /** Publishing attempts that reached the claim; bounded by the publisher. */
+    attempts: integer("attempts").notNull().default(0),
+    /** Set by the claim; a post stuck in publishing past a deadline is reported, never re-sent. */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    resultExternalId: text("result_external_id"),
+    resultPermalink: text("result_permalink"),
+    /** Progress a retry may reuse (an Instagram container id), never the fact of publishing. */
+    progress: jsonb("progress").notNull().default(sql`'{}'::jsonb`).$type<Record<string, unknown>>(),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("scheduled_posts_due_idx").on(t.status, t.publishAt),
+    index("scheduled_posts_project_idx").on(t.projectId, t.publishAt),
+    check(
+      "scheduled_posts_status_ck",
+      sql`${t.status} IN ('draft', 'awaiting_approval', 'rejected', 'scheduled', 'publishing', 'published', 'failed', 'canceled')`,
+    ),
+    check(
+      "scheduled_posts_decided_ck",
+      sql`${t.status} IN ('draft', 'awaiting_approval', 'rejected', 'canceled') OR (${t.decidedBy} IS NOT NULL AND ${t.decidedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
 // ---------------------------------------------------------------- relations
 
 export const projectsRelations = relations(projects, ({ many, one }) => ({
@@ -987,8 +1182,18 @@ export type KeywordDevice = "desktop" | "mobile";
 export type PositionSource = "gsc" | "dataforseo";
 export type IdeaSource = "autocomplete" | "gsc" | "dataforseo";
 export type PageSpeedStrategy = "mobile" | "desktop";
-export type ScheduleKind = "scan" | "rank" | "pagespeed" | "competitors" | "report";
-export type AlertKind = "score_drop" | "new_critical" | "rank_drop" | "page_down" | "cwv_regression" | "index_drop";
+export type ScheduleKind = "scan" | "rank" | "pagespeed" | "competitors" | "report" | "social_sync";
+export type AlertKind =
+  | "score_drop"
+  | "new_critical"
+  | "rank_drop"
+  | "page_down"
+  | "cwv_regression"
+  | "index_drop"
+  | "follower_drop"
+  | "engagement_drop"
+  | "token_expiring"
+  | "publish_failed";
 export type AlertChannel = "in_app" | "webhook" | "telegram";
 export type IntegrationKind = "DATAFORSEO" | "PAGESPEED" | "TELEGRAM_ALERTS";
 export type ReportKind = "audit" | "executive" | "keywords";
@@ -1072,3 +1277,93 @@ export type OrgIntegration = typeof orgIntegrations.$inferSelect;
 export type ContentDocument = typeof contentDocuments.$inferSelect;
 export type Report = typeof reports.$inferSelect;
 export type PageDetails = typeof pageDetails.$inferSelect;
+
+// ---------------------------------------------------------------- 0009 types
+
+export type ProjectKind = "WEBSITE" | "INSTAGRAM" | "TELEGRAM";
+export type SocialPlatform = Exclude<ProjectKind, "WEBSITE">;
+export type SocialSource = "api" | "public_preview";
+export type SocialPostType = "image" | "video" | "reel" | "carousel" | "text" | "photo" | "album" | "other";
+export type SocialProfile = {
+  pictureUrl?: string | null;
+  /** Instagram: BUSINESS | MEDIA_CREATOR. */
+  accountType?: string | null;
+  /** Telegram: the bot that manages the channel. */
+  botId?: number;
+  botUsername?: string | null;
+  /** Telegram: the bot's administrator rights in the channel, as last checked. */
+  rights?: Record<string, boolean>;
+  pinnedMessageId?: number | null;
+  pinnedText?: string | null;
+  /** Telegram: how channel posts reach the panel. */
+  updates?: { mode: "webhook" | "polling"; offset?: number; setAt?: string; error?: string | null };
+  /** Telegram: whether t.me/s/<username> answers (public channels only). */
+  publicPreview?: boolean;
+  /** Instagram: Business Discovery works with this token (competitors). */
+  businessDiscovery?: boolean | null;
+};
+export type SocialSettings = {
+  /** Words the profile should be found for (search inside Instagram / Telegram). */
+  keywords?: string[];
+  /** The call to action the audit looks for and suggests, e.g. "Order via DM". */
+  cta?: string | null;
+  /** The link the audit suggests adding (site, shop). */
+  link?: string | null;
+  /** IANA zone for best-time analytics and the calendar; default Asia/Tehran. */
+  timezone?: string | null;
+};
+export type SocialPostMetrics = {
+  likes?: number;
+  comments?: number;
+  saves?: number;
+  shares?: number;
+  reach?: number;
+  views?: number;
+  interactions?: number;
+};
+export type SocialPostFeatures = { length?: number; formatted?: boolean; links?: number; lineBreaks?: number };
+export type SocialCompetitorSnapshot = {
+  source: "business_discovery" | "public_preview";
+  name: string | null;
+  bio: string | null;
+  followers: number | null;
+  mediaCount: number | null;
+  /** Recent posts seen: {at, views?, likes?, comments?}. */
+  recent: Array<{ at: string | null; views?: number | null; likes?: number | null; comments?: number | null }>;
+  postsPerWeek: number | null;
+  avgViews: number | null;
+  avgInteractions: number | null;
+};
+export type ScheduledPostStatus =
+  | "draft"
+  | "awaiting_approval"
+  | "rejected"
+  | "scheduled"
+  | "publishing"
+  | "published"
+  | "failed"
+  | "canceled";
+export type ScheduledMedia = { url: string; type: "image" | "video"; altText?: string | null };
+export type ScheduledPostPayload =
+  | {
+      op: "post";
+      /** Instagram: image | carousel | reel. Telegram: text | photo | album | video. */
+      format: "image" | "carousel" | "reel" | "text" | "photo" | "album" | "video";
+      /** Instagram caption, or Telegram text/caption (Telegram HTML). */
+      text: string;
+      media: ScheduledMedia[];
+      /** Telegram: pin after sending. */
+      pin?: boolean;
+      /** Telegram: send silently. */
+      silent?: boolean;
+      /** Instagram reels: also show in the grid. */
+      shareToFeed?: boolean;
+    }
+  | { op: "edit"; messageId: number; text: string; target: "text" | "caption" }
+  | { op: "pin"; messageId: number; silent?: boolean };
+
+export type SocialAccount = typeof socialAccounts.$inferSelect;
+export type SocialPost = typeof socialPosts.$inferSelect;
+export type SocialMetricsDay = typeof socialMetricsDaily.$inferSelect;
+export type SocialCompetitor = typeof socialCompetitors.$inferSelect;
+export type ScheduledPost = typeof scheduledPosts.$inferSelect;

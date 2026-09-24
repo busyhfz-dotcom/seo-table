@@ -12,8 +12,8 @@
  *
  * Notes are stable English sentences; the web layer translates them.
  */
-import { connectors, db, eq, projects, type Connector as ConnectorRow, type PlatformInfo } from "@seo/db";
-import { NotFound } from "@seo/core";
+import { connectors, db, eq, projects, type Connector as ConnectorRow, type PlatformInfo, type WriteTarget } from "@seo/db";
+import { BadRequest, NotFound } from "@seo/core";
 import type { ConnectorCapabilities } from "./types.js";
 import { resolveWriteTarget, type ResolvedWriteTarget } from "./write-target.js";
 import { SEO_PLUGIN_LABELS } from "./wp-seo-plugins.js";
@@ -42,7 +42,7 @@ export type ConnectionMethod = {
 
 export type ConnectionOverview = {
   platform: PlatformInfo | null;
-  writeTarget: { configured: ResolvedWriteTarget["configured"]; effective: ResolvedWriteTarget["kind"]; source: ResolvedWriteTarget["source"] };
+  writeTarget: { configured: ResolvedWriteTarget["configured"]; effective: WriteTarget; source: ResolvedWriteTarget["source"] };
   methods: ConnectionMethod[];
   /** About the overview as a whole, e.g. that the platform is not detected yet. */
   notes: string[];
@@ -58,7 +58,10 @@ export async function connectionOverview(projectId: string): Promise<ConnectionO
   const rows = await db.select().from(connectors).where(eq(connectors.projectId, projectId));
   const row = (kind: ConnectorRow["kind"]) => rows.find((r) => r.kind === kind);
   const config = (r: ConnectorRow | undefined) => (r?.config ?? {}) as StoredConfig;
-  const target = await resolveWriteTarget(projectId);
+  // Website connection methods mean nothing for an Instagram or Telegram project.
+  if (project.kind !== "WEBSITE") throw new BadRequest("This project is not a website", { reason: "not_a_website" });
+  const resolved = await resolveWriteTarget(projectId);
+  const target = { ...resolved, kind: resolved.kind as WriteTarget };
   const platform = project.platform ?? null;
 
   const isWordPress = platform ? platform.cms === "wordpress" : null;

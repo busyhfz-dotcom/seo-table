@@ -14,7 +14,8 @@ import { NotFound } from "@seo/core";
 export const WRITE_TARGETS: readonly WriteTarget[] = ["WORDPRESS", "CLOUDFLARE"];
 
 export type ResolvedWriteTarget = {
-  kind: WriteTarget;
+  /** A social project writes through its own account: Telegram's bot, or Instagram (which can write nothing). */
+  kind: WriteTarget | "TELEGRAM" | "INSTAGRAM";
   /** The project's explicit setting, or null for automatic. */
   configured: WriteTarget | null;
   source: "configured" | "cloudflare_connected" | "default";
@@ -22,9 +23,10 @@ export type ResolvedWriteTarget = {
 
 export async function resolveWriteTarget(projectId: string): Promise<ResolvedWriteTarget> {
   const project = (
-    await db.select({ writeTarget: projects.writeTarget }).from(projects).where(eq(projects.id, projectId)).limit(1)
+    await db.select({ writeTarget: projects.writeTarget, kind: projects.kind }).from(projects).where(eq(projects.id, projectId)).limit(1)
   )[0];
   if (!project) throw new NotFound("Project not found");
+  if (project.kind !== "WEBSITE") return { kind: project.kind, configured: null, source: "default" };
   const configured = project.writeTarget ?? null;
   if (configured) return { kind: configured, configured, source: "configured" };
 

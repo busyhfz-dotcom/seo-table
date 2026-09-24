@@ -18,6 +18,7 @@ const SCHEDULE: Record<string, { fa: string; en: string }> = {
   pagespeed: { fa: "سرعت صفحه", en: "PageSpeed" },
   competitors: { fa: "رقبا", en: "competitors" },
   report: { fa: "گزارش", en: "report" },
+  social_sync: { fa: "همگام‌سازی صفحه", en: "profile sync" },
 };
 
 const ALERT: Record<string, { fa: string; en: string }> = {
@@ -27,6 +28,15 @@ const ALERT: Record<string, { fa: string; en: string }> = {
   page_down: { fa: "از دسترس خارج شدن سایت", en: "site down" },
   cwv_regression: { fa: "افت سرعت", en: "speed regression" },
   index_drop: { fa: "کاهش صفحات ایندکس‌شده", en: "indexed pages drop" },
+  follower_drop: { fa: "افت دنبال‌کننده", en: "follower drop" },
+  engagement_drop: { fa: "افت تعامل", en: "engagement drop" },
+  token_expiring: { fa: "انقضای اتصال اینستاگرام", en: "Instagram connection expiring" },
+  publish_failed: { fa: "انتشار ناموفق پست", en: "failed post" },
+};
+
+const PLATFORM: Record<string, { fa: string; en: string }> = {
+  INSTAGRAM: { fa: "اینستاگرام", en: "Instagram" },
+  TELEGRAM: { fa: "کانال تلگرام", en: "Telegram channel" },
 };
 
 export function describeSeoDataAction(action: string, metadata: unknown, locale: Locale): string | null {
@@ -103,6 +113,48 @@ export function describeSeoDataAction(action: string, metadata: unknown, locale:
       return fa ? "ساخت گزارش PDF درخواست شد" : "A PDF report was requested";
     case "report.delete":
       return fa ? "گزارش حذف شد" : "Report deleted";
+    case "social.oauth_start":
+      return fa ? "اتصال اینستاگرام آغاز شد" : "Instagram connection started";
+    case "social.connect":
+      return fa ? `${pick(PLATFORM, m.platform, { fa: "حساب", en: "Account" })} وصل شد` : `${pick(PLATFORM, m.platform, { fa: "حساب", en: "Account" })} connected`;
+    case "social.connect_failed":
+      return fa ? `اتصال ${pick(PLATFORM, m.platform, { fa: "حساب", en: "account" })} ناموفق بود` : `Connecting the ${pick(PLATFORM, m.platform, { fa: "حساب", en: "account" })} failed`;
+    case "social.disconnect":
+      return fa ? `اتصال ${pick(PLATFORM, m.platform, { fa: "حساب", en: "account" })} قطع شد` : `${pick(PLATFORM, m.platform, { fa: "حساب", en: "Account" })} disconnected`;
+    case "social.check":
+      return m.ok === false ? (fa ? "بررسی اتصال ناموفق بود" : "Connection check failed") : fa ? "اتصال بررسی شد" : "Connection checked";
+    case "social.sync":
+      return m.queued ? (fa ? "همگام‌سازی درخواست شد" : "Sync requested") : m.ok === false ? (fa ? "همگام‌سازی ناموفق بود" : "Sync failed") : fa ? `همگام‌سازی انجام شد (${n(m.posts)} پست)` : `Synced (${n(m.posts)} posts)`;
+    case "social.audit":
+      return fa ? `ممیزی صفحه انجام شد (امتیاز ${n(m.score)})` : `Profile audited (score ${n(m.score)})`;
+    case "social.settings_update":
+      return fa ? "کلیدواژه‌ها و تنظیمات صفحه تغییر کرد" : "Profile keywords and settings changed";
+    case "social.token_refresh":
+      return fa ? "اتصال اینستاگرام تمدید شد" : "Instagram connection renewed";
+    case "social.competitor_add":
+      return fa ? "رقیب تازه اضافه شد" : "Competitor added";
+    case "social.competitor_delete":
+      return fa ? "رقیب حذف شد" : "Competitor removed";
+    case "social.competitor_refresh":
+      return fa ? "آمار رقبا به‌روز شد" : "Competitors refreshed";
+    case "social.post_create":
+      return fa ? "پیش‌نویس پست ساخته شد" : "Post drafted";
+    case "social.post_update":
+      return fa ? "پست برنامه‌ریزی‌شده ویرایش شد" : "Planned post edited";
+    case "social.post_submit":
+      return fa ? "پست برای تأیید فرستاده شد" : "Post submitted for approval";
+    case "social.post_approve":
+      return fa ? "انتشار پست تأیید شد" : "Post approved for publishing";
+    case "social.post_reject":
+      return fa ? "انتشار پست رد شد" : "Post rejected";
+    case "social.post_cancel":
+      return fa ? "پست لغو شد" : "Post canceled";
+    case "social.post_publish_now":
+      return fa ? "انتشار فوری پست درخواست شد" : "Immediate publishing requested";
+    case "social.post_published":
+      return fa ? "پست منتشر شد" : "Post published";
+    case "social.post_failed":
+      return fa ? "انتشار پست ناموفق بود" : "Post could not be published";
     case "report.brand_update":
       return fa ? "نشان تجاری گزارش‌ها تغییر کرد" : "Report branding changed";
     case "integration.test":

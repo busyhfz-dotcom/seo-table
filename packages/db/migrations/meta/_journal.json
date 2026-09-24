@@ -64,6 +64,13 @@
       "when": 1790172558044,
       "tag": "0008_content_schema_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790253342358,
+      "tag": "0009_social_profiles",
+      "breakpoints": true
     }
   ]
 }

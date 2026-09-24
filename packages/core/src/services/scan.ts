@@ -20,7 +20,7 @@ import {
   type AuditRun,
   type RunTrigger,
 } from "@seo/db";
-import { Conflict, NotFound, ScanAlreadyRunning } from "../errors.js";
+import { BadRequest, Conflict, NotFound, ScanAlreadyRunning } from "../errors.js";
 import { childLogger, metric } from "../logger.js";
 import { auditJobId, enqueueAudit } from "../queue.js";
 import { scanLimit } from "../ratelimit.js";
@@ -57,6 +57,13 @@ export async function createScan(input: CreateScanInput): Promise<CreateScanResu
   )[0];
   if (!project) throw new NotFound("Project not found");
   if (project.orgId !== input.orgId) throw new NotFound("Project not found");
+  // A social project's base URL is instagram.com or t.me: never ours to crawl.
+  if (project.kind !== "WEBSITE") {
+    throw new BadRequest("Only website projects can be scanned; this project is audited by the social audit", {
+      reason: "not_a_website",
+      kind: project.kind,
+    });
+  }
 
   // 1) Replay: the same key always returns the same run, never a second crawl.
   const existingByKey = (

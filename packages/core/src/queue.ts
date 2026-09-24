@@ -29,6 +29,8 @@ export const PAGESPEED_QUEUE = "pagespeed";
 export const COMPETITOR_QUEUE = "competitor-snapshot";
 export const NOTIFY_QUEUE = "notify-deliver";
 export const REPORT_QUEUE = "report-generate";
+/** 0009: Instagram / Telegram sync and post publishing. */
+export const SOCIAL_QUEUE = "social";
 
 export type AuditJobData = {
   runId: string;
@@ -72,6 +74,10 @@ export type ReportJobData = DataJobBase & {
   locale?: "fa" | "en";
 };
 export type NotifyJobData = { notificationId: string; channel: "webhook" | "telegram" };
+/** Job name "sync": profile, posts, metrics, then the audit and alerts. */
+export type SocialSyncJobData = DataJobBase;
+/** Job name "publish": one planned post; the publisher's claim makes a repeat a no-op. */
+export type SocialPublishJobData = { postId: string; projectId: string; requestedBy: string; correlationId: string };
 
 /**
  * Redis key prefix for every queue. Separate deployments (or the test suite)
@@ -115,6 +121,7 @@ type DataQueues = {
   competitor: Queue<CompetitorJobData>;
   notify: Queue<NotifyJobData>;
   report: Queue<ReportJobData>;
+  social: Queue<SocialSyncJobData | SocialPublishJobData>;
 };
 const globalForData = globalThis as unknown as { __dataQueues?: Partial<DataQueues> };
 const dataQueues: Partial<DataQueues> = globalForData.__dataQueues ?? {};
@@ -126,6 +133,7 @@ const DATA_QUEUE_NAMES: Record<keyof DataQueues, string> = {
   competitor: COMPETITOR_QUEUE,
   notify: NOTIFY_QUEUE,
   report: REPORT_QUEUE,
+  social: SOCIAL_QUEUE,
 };
 
 export function dataQueue<K extends keyof DataQueues>(kind: K): DataQueues[K] {
@@ -238,6 +246,30 @@ export function enqueueCompetitors(data: CompetitorJobData): Promise<EnqueueResu
 
 export function enqueueReport(data: ReportJobData): Promise<EnqueueResult> {
   return addDeduplicated(dataQueue("report"), "generate", data, `report-${data.projectId}-${data.kind}`, dataJobId("report", data.projectId));
+}
+
+export function enqueueSocialSync(data: SocialSyncJobData): Promise<EnqueueResult> {
+  return addDeduplicated(
+    dataQueue("social") as unknown as Queue<SocialSyncJobData>,
+    "sync",
+    data,
+    `social-sync-${data.projectId}`,
+    dataJobId("social-sync", data.projectId),
+  );
+}
+
+/**
+ * One attempt per call and no BullMQ retry: whether a failed publish may be
+ * tried again is the publisher's decision (it knows if the platform could have
+ * received the post), never the queue's.
+ */
+export async function enqueueSocialPublish(data: SocialPublishJobData): Promise<string> {
+  const jobId = `social-publish-${data.postId}-${Date.now().toString(36)}${newToken(4)}`;
+  // Deduplicated while one is waiting or running, so the publisher tick does not pile up jobs behind a slow reel.
+  await withDeadline(() =>
+    (dataQueue("social") as unknown as Queue).add("publish", data, { jobId, attempts: 1, deduplication: { id: `social-publish-${data.postId}` } }),
+  );
+  return jobId;
 }
 
 /** Delivery retries with backoff; the job id makes a repeated enqueue for the same channel a no-op. */

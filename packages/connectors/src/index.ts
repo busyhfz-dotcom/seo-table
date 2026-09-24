@@ -3,13 +3,15 @@
  * and hands back a live client. Credentials are decrypted here and nowhere else,
  * and are never returned to a caller.
  */
-import { db, connectors as connectorsTable, eq, and, type ConnectorKind } from "@seo/db";
+import { db, connectors as connectorsTable, socialAccounts, eq, and, type ConnectorKind } from "@seo/db";
 import { seal, unsealJson, type SealedSecret } from "@seo/core";
 import { ga4, type Ga4Credentials } from "./ga4.js";
 import { searchConsole, type SearchConsoleCredentials, type UrlInspection } from "./search-console.js";
 import { instagram, youtube, type SocialCredentials } from "./social.js";
 import { wordpress, type WordPressCredentials } from "./wordpress.js";
 import { cloudflare, type CloudflareCredentials } from "./cloudflare.js";
+import { telegramChannel, type TelegramChannelCredentials } from "./telegram.js";
+import { instagramAccount } from "./instagram.js";
 import { NotConnected } from "@seo/core";
 import type { Connector } from "./types.js";
 
@@ -39,6 +41,10 @@ export {
   type InstallResult,
 } from "./cloudflare.js";
 export { resolveWriteTarget, WRITE_TARGETS, type ResolvedWriteTarget } from "./write-target.js";
+export * from "./instagram.js";
+export * from "./telegram.js";
+export * from "./telegram-preview.js";
+export { socialEndpoints, setSocialEndpoints, deliveryOf, type SocialEndpoints } from "./social-endpoints.js";
 export { detectPlatform, refreshPlatform, PLATFORM_MAX_AGE_MS, type Platform } from "./platform.js";
 export { buildFixPack, zipFixPack, type FixPack, type FixPackFile } from "./fixpack.js";
 export { SEO_PLUGIN_LABELS } from "./wp-seo-plugins.js";
@@ -56,7 +62,8 @@ export type AnyCredentials =
   | SearchConsoleCredentials
   | Ga4Credentials
   | SocialCredentials
-  | CloudflareCredentials;
+  | CloudflareCredentials
+  | TelegramChannelCredentials;
 
 export function build(kind: ConnectorKind, creds: AnyCredentials): Connector {
   switch (kind) {
@@ -72,6 +79,8 @@ export function build(kind: ConnectorKind, creds: AnyCredentials): Connector {
       return youtube(creds as SocialCredentials);
     case "CLOUDFLARE":
       return cloudflare(creds as CloudflareCredentials);
+    case "TELEGRAM":
+      return telegramChannel(creds as TelegramChannelCredentials);
     default: {
       const never: never = kind;
       throw new Error(`Unknown connector kind: ${String(never)}`);
@@ -94,6 +103,11 @@ export async function forProjectToCheck(projectId: string, kind: ConnectorKind):
 }
 
 async function load(projectId: string, kind: ConnectorKind, evenIfFailing: boolean): Promise<Connector> {
+  if (kind === "TELEGRAM" || kind === "INSTAGRAM") {
+    const social = await loadSocial(projectId, kind, evenIfFailing);
+    if (social) return social;
+    if (kind === "TELEGRAM") throw new NotConnected(kind);
+  }
   const rows = await db
     .select()
     .from(connectorsTable)
@@ -110,6 +124,27 @@ async function load(projectId: string, kind: ConnectorKind, evenIfFailing: boole
     tag: row.secretTag,
   });
   return build(kind, creds);
+}
+
+/**
+ * An Instagram or Telegram project's account (social_accounts), as the fix
+ * executor sees it. null when the project has no account of that platform (a
+ * website project's legacy INSTAGRAM row is then used instead).
+ */
+async function loadSocial(projectId: string, kind: "TELEGRAM" | "INSTAGRAM", evenIfFailing: boolean): Promise<Connector | null> {
+  const row = (
+    await db
+      .select()
+      .from(socialAccounts)
+      .where(and(eq(socialAccounts.projectId, projectId), eq(socialAccounts.platform, kind)))
+      .limit(1)
+  )[0];
+  if (!row) return null;
+  const usable = row.status === "CONNECTED" || (evenIfFailing && row.status === "ERROR");
+  if (!usable || !row.secretCipher || !row.secretIv || !row.secretTag || !row.externalId) throw new NotConnected(kind);
+  const secret = unsealJson<{ botToken?: string; accessToken?: string }>({ cipher: row.secretCipher, iv: row.secretIv, tag: row.secretTag });
+  if (kind === "TELEGRAM") return telegramChannel({ botToken: secret.botToken ?? "", chatId: row.externalId });
+  return instagramAccount({ accessToken: secret.accessToken ?? "", userId: row.externalId });
 }
 
 /** The project's Cloudflare edge connector, with install/uninstall/status. */

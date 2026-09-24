@@ -9,6 +9,7 @@ import {
   enqueuePageSpeed,
   enqueueRankSync,
   enqueueReport,
+  enqueueSocialSync,
   newToken,
   scanService,
   type CompetitorJobData,
@@ -82,6 +83,9 @@ export const dispatchSchedule: Dispatch = async (s) => {
       return;
     case "report":
       await enqueueReport({ ...base, kind: "executive" });
+      return;
+    case "social_sync":
+      await enqueueSocialSync(base);
       return;
   }
 };

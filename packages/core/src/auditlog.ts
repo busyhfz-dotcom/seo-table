@@ -82,7 +82,28 @@ export type AuditAction =
   | "robots.propose"
   | "sitemap.propose"
   | "report.delete"
-  | "report.brand_update";
+  | "report.brand_update"
+  | "social.oauth_start"
+  | "social.connect"
+  | "social.connect_failed"
+  | "social.disconnect"
+  | "social.check"
+  | "social.sync"
+  | "social.audit"
+  | "social.settings_update"
+  | "social.token_refresh"
+  | "social.competitor_add"
+  | "social.competitor_delete"
+  | "social.competitor_refresh"
+  | "social.post_create"
+  | "social.post_update"
+  | "social.post_submit"
+  | "social.post_approve"
+  | "social.post_reject"
+  | "social.post_cancel"
+  | "social.post_publish_now"
+  | "social.post_published"
+  | "social.post_failed";
 
 export async function record(input: {
   orgId: string;

@@ -40,6 +40,13 @@ export const ACTION_RISK: Record<FixAction, RiskLevel> = {
   SCHEMA_MARKUP: "SENSITIVE",
   ROBOTS_TXT: "SENSITIVE",
   SITEMAP_XML: "SENSITIVE",
+  // What a page or channel says about itself, and posts in its owner's name,
+  // are public statements by that owner: a person decides each one.
+  SOCIAL_PROFILE_NAME: "SENSITIVE",
+  SOCIAL_BIO: "SENSITIVE",
+  SOCIAL_TITLE: "SENSITIVE",
+  SOCIAL_DESCRIPTION: "SENSITIVE",
+  SOCIAL_POST: "SENSITIVE",
 };
 
 /**

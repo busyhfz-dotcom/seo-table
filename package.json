@@ -27,6 +27,7 @@
     "@seo/db": "workspace:*",
     "@seo/pipeline": "workspace:*",
     "@seo/seo-data": "workspace:*",
+    "@seo/social": "workspace:*",
     "@types/node": "^22.10.2",
     "miniflare": "4.20260730.0",
     "playwright": "1.56.1",

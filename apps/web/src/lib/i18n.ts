@@ -542,6 +542,8 @@ const fa = {
   wt_src_default: "خودکار",
   tg_CLOUDFLARE: "لبه‌ی Cloudflare",
   tg_WORDPRESS: "وردپرس",
+  tg_TELEGRAM: "ربات تلگرام",
+  tg_INSTAGRAM: "اینستاگرام",
 
   sc_title: "Google Search Console",
   sc_intro: "نقشه‌ی سایت را به گوگل معرفی کنید و وضعیت ایندکس هر نشانی را از خود گوگل بپرسید.",
@@ -1134,6 +1136,8 @@ const en: Dict = {
   wt_src_default: "automatic",
   tg_CLOUDFLARE: "Cloudflare edge",
   tg_WORDPRESS: "WordPress",
+  tg_TELEGRAM: "Telegram bot",
+  tg_INSTAGRAM: "Instagram",
 
   sc_title: "Google Search Console",
   sc_intro: "Tell Google about your sitemap and ask Google itself whether any URL is indexed.",

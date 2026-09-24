@@ -42,7 +42,19 @@ import { assessCwv } from "./providers/pagespeed.js";
 import { movers } from "./rank.js";
 import { daysAgo, isoDate } from "./text.js";
 
-export const ALERT_KINDS: readonly AlertKind[] = ["score_drop", "new_critical", "rank_drop", "page_down", "cwv_regression", "index_drop"];
+export const ALERT_KINDS: readonly AlertKind[] = [
+  "score_drop",
+  "new_critical",
+  "rank_drop",
+  "page_down",
+  "cwv_regression",
+  "index_drop",
+  // Instagram / Telegram projects (evaluated by @seo/social after each sync or publish).
+  "follower_drop",
+  "engagement_drop",
+  "token_expiring",
+  "publish_failed",
+];
 
 export const DEFAULT_THRESHOLDS: Record<AlertKind, number | null> = {
   score_drop: 5,
@@ -51,6 +63,13 @@ export const DEFAULT_THRESHOLDS: Record<AlertKind, number | null> = {
   page_down: null,
   cwv_regression: 10,
   index_drop: 20,
+  /** Percent fewer followers than seven days earlier. */
+  follower_drop: 5,
+  /** Percent lower engagement (Instagram) or view rate (Telegram), last 10 posts against the 10 before. */
+  engagement_drop: 30,
+  /** Days before the Instagram token expires with its refresh failing. */
+  token_expiring: 7,
+  publish_failed: null,
 };
 
 const channel = z.enum(["in_app", "webhook", "telegram"]);

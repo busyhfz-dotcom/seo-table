@@ -16,6 +16,7 @@ COPY packages/connectors/package.json packages/connectors/
 COPY packages/pipeline/package.json packages/pipeline/
 COPY packages/browser/package.json packages/browser/
 COPY packages/seo-data/package.json packages/seo-data/
+COPY packages/social/package.json packages/social/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 # No BuildKit cache mount: Railway rejects cache mounts whose id is not

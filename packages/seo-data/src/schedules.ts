@@ -24,10 +24,10 @@
  */
 import cronParser from "cron-parser";
 import { z } from "zod";
-import { and, db, eq, pool, schedules, sql, type Schedule, type ScheduleKind } from "@seo/db";
+import { and, db, eq, pool, projects, schedules, sql, type ProjectKind, type Schedule, type ScheduleKind } from "@seo/db";
 import { BadRequest, childLogger } from "@seo/core";
 
-export const SCHEDULE_KINDS: readonly ScheduleKind[] = ["scan", "rank", "pagespeed", "competitors", "report"];
+export const SCHEDULE_KINDS: readonly ScheduleKind[] = ["scan", "rank", "pagespeed", "competitors", "report", "social_sync"];
 
 /** What a new project starts with (migration 0007 inserts the same values). */
 export const DEFAULT_SCHEDULES: Record<ScheduleKind, { cron: string; enabled: boolean }> = {
@@ -36,6 +36,8 @@ export const DEFAULT_SCHEDULES: Record<ScheduleKind, { cron: string; enabled: bo
   pagespeed: { cron: "0 5 * * 3", enabled: true },
   competitors: { cron: "0 6 * * 0", enabled: true },
   report: { cron: "0 7 1 * *", enabled: false },
+  /** Instagram / Telegram projects only (migration 0009 creates it for them). */
+  social_sync: { cron: "0 2 * * *", enabled: true },
 };
 
 /** Two runs of one schedule must be at least this far apart. */
@@ -87,10 +89,16 @@ export const updateScheduleInput = z.object({
   enabled: z.boolean().optional(),
 });
 
+/** The schedules that mean something for a project of this kind. */
+export function scheduleKindsFor(projectKind: ProjectKind): readonly ScheduleKind[] {
+  return projectKind === "WEBSITE" ? SCHEDULE_KINDS.filter((k) => k !== "social_sync") : ["social_sync"];
+}
+
 export async function listSchedules(projectId: string, now = new Date()): Promise<Schedule[]> {
   const rows = await db.select().from(schedules).where(eq(schedules.projectId, projectId));
+  const project = (await db.select({ kind: projects.kind }).from(projects).where(eq(projects.id, projectId)).limit(1))[0];
   // A kind the user deleted (or a project from before the defaults) shows as its disabled default.
-  return SCHEDULE_KINDS.map((kind) => {
+  return scheduleKindsFor(project?.kind ?? "WEBSITE").map((kind) => {
     const r = rows.find((x) => x.kind === kind);
     if (r) return { ...r, nextRunAt: r.enabled ? (r.nextRunAt ?? nextRun(r.cron, r.timezone, now)) : null };
     return {

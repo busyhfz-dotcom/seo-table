@@ -16,7 +16,8 @@ apps/
 packages/
   db/             Drizzle schema, SQL migrations, the database guards
   core/           crawler, rules, scoring, safety policy, RBAC, rate limits, queue
-  connectors/     WordPress, Search Console, GA4, Instagram, YouTube
+  connectors/     WordPress, Cloudflare, Search Console, GA4, Instagram, Telegram, YouTube
+  social/         Instagram pages and Telegram channels: sync, audit, analytics, planner
   pipeline/       analysis, fix execution, rollback, agent mode
 tests/            end-to-end tests against a real HTTP fixture site
 scripts/          seed, smoke test, fixture server, container entrypoint, Railway deploy
@@ -124,9 +125,36 @@ default `SMOKE_SITE`); web and worker must then run with `ALLOW_PRIVATE_NETWORK=
 - **Search Console / GA4** — service-account key or OAuth refresh token. Content
   Opportunities is built only from Search Console data; with no connector it is
   empty.
-- **Instagram / YouTube** — connector, token handling and OAuth flow are
-  implemented, but no OAuth application is registered yet. They report "not
-  connected" and show no data until one is.
+- **YouTube** — connector, token handling and OAuth flow are implemented, but
+  no OAuth application is registered yet. It reports "not connected" and shows
+  no data until one is.
+
+## Instagram pages and Telegram channels
+
+A project is a website, an Instagram page or a Telegram channel
+(`projects.kind`, fixed at creation). A social project is never crawled; it
+gets a daily `social_sync` (profile, posts, metrics → audit → competitors →
+alerts), a planner whose posts publish only after a person approves them, and
+the same issues / approvals / audit log as a website.
+
+- **Instagram** (Instagram API with Instagram Login, Business or Creator
+  accounts). Set `META_APP_ID` and `META_APP_SECRET` (Meta app → Instagram →
+  API setup with Instagram login) and register
+  `${APP_URL}/api/oauth/instagram/callback` as the redirect URI; the owner then
+  presses Connect and approves on Instagram. Tokens last 60 days and are
+  refreshed by the daily sync. The API cannot edit the name, bio or website, so
+  those findings come with text to paste in the app. Competitor numbers need
+  Business Discovery, which Meta offers with Facebook Login only: with
+  Instagram Login competitors show as unsupported (instagram.com is never
+  scraped).
+- **Telegram** — the owner creates a bot with @BotFather, adds it to the
+  channel as an administrator with *Post messages*, *Edit messages of others*
+  and *Change channel info*, and pastes the bot token and the channel's
+  @username in the panel. Title and description changes go through the
+  approval queue and can be rolled back. With a public https `APP_URL` new
+  posts arrive by webhook; otherwise the worker polls. View counts come from
+  the channel's public preview (`t.me/s/<channel>`, public channels only,
+  rounded by Telegram).
 
 ## Deploying
 

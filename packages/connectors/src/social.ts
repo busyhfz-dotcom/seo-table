@@ -1,5 +1,9 @@
 /**
- * Instagram and YouTube.
+ * YouTube, and the legacy per-site Instagram connector row.
+ *
+ * Instagram pages are managed as projects of their own kind (see
+ * instagram.ts and @seo/social); the shell below only keeps the Connectors
+ * screen of a website project honest about that row.
  *
  * These are production-ready connector shells, not demos. The OAuth flow, the
  * token store, the refresh logic and the API surface are all defined — but no
@@ -12,6 +16,7 @@
  * OAuth credentials exist, `authorizeUrl` / `exchangeCode` / `refresh` are the
  * only functions that need filling in, and the rest already works.
  */
+import { INSTAGRAM_GRAPH_VERSION, INSTAGRAM_SCOPES } from "./instagram.js";
 import { ConnectorError, httpJson, type Connector, type ConnectorCapabilities, type ConnectorHealth } from "./types.js";
 
 export type OAuthAppConfig = {
@@ -170,12 +175,12 @@ function shell(
 
 export function instagram(creds: SocialCredentials = {}) {
   return shell("INSTAGRAM", creds, {
-    authBase: "https://api.instagram.com/oauth/authorize",
+    authBase: "https://www.instagram.com/oauth/authorize",
     tokenUrl: "https://api.instagram.com/oauth/access_token",
-    scopes: ["instagram_basic", "instagram_manage_insights", "pages_show_list"],
-    profileUrl: (id) => `https://graph.instagram.com/${id}?fields=id,username`,
+    scopes: [...INSTAGRAM_SCOPES],
+    profileUrl: (id) => `https://graph.instagram.com/${INSTAGRAM_GRAPH_VERSION}/${id}?fields=user_id,username`,
     notes: [
-      "Requires a Meta app with Instagram Graph API access and a Business or Creator account.",
+      "Instagram pages are connected as Instagram projects (Instagram Login, Business or Creator account).",
       "No data is displayed until a real account authorizes the app.",
     ],
   });

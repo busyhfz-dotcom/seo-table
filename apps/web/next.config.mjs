@@ -12,7 +12,7 @@ const scriptSrc = process.env.NODE_ENV === "development" ? "script-src 'self' 'u
 const nextConfig = {
   reactStrictMode: true,
   // The workspace packages ship TypeScript source, so Next compiles them.
-  transpilePackages: ["@seo/core", "@seo/db", "@seo/connectors", "@seo/pipeline", "@seo/seo-data"],
+  transpilePackages: ["@seo/core", "@seo/db", "@seo/connectors", "@seo/pipeline", "@seo/seo-data", "@seo/social"],
   poweredByHeader: false,
   // Loaded from node_modules at runtime instead of bundled: native bindings,
   // worker threads (pino) and undici's own dynamic requires do not survive webpack.

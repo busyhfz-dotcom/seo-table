@@ -36,6 +36,10 @@ export const PERMISSIONS = [
   // Content editor documents: write, import, analyse, and ask for WordPress publishing
   // (publishing itself needs fix:approve_sensitive).
   "content:write",
+  // Instagram / Telegram projects: sync, audit, competitors, drafting and
+  // submitting planned posts (publishing itself needs fix:approve_sensitive,
+  // connecting an account needs connector:write).
+  "social:write",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -52,6 +56,7 @@ const EDITOR: Permission[] = [
   "report:write",
   "tracking:write",
   "content:write",
+  "social:write",
 ];
 
 const ADMIN: Permission[] = [

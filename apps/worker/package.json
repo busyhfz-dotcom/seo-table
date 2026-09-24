@@ -17,6 +17,7 @@
     "@seo/db": "workspace:*",
     "@seo/pipeline": "workspace:*",
     "@seo/seo-data": "workspace:*",
+    "@seo/social": "workspace:*",
     "bullmq": "^5.34.6",
     "ioredis": "^5.4.2",
     "tsx": "^4.19.2"

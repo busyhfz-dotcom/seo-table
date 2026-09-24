@@ -30,6 +30,9 @@ importers:
       '@seo/seo-data':
         specifier: workspace:*
         version: link:packages/seo-data
+      '@seo/social':
+        specifier: workspace:*
+        version: link:packages/social
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.4
@@ -66,6 +69,9 @@ importers:
       '@seo/seo-data':
         specifier: workspace:*
         version: link:../../packages/seo-data
+      '@seo/social':
+        specifier: workspace:*
+        version: link:../../packages/social
       next:
         specifier: 15.5.25
         version: 15.5.25(@types/node@22.20.4)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -121,6 +127,9 @@ importers:
       '@seo/seo-data':
         specifier: workspace:*
         version: link:../../packages/seo-data
+      '@seo/social':
+        specifier: workspace:*
+        version: link:../../packages/social
       bullmq:
         specifier: ^5.34.6
         version: 5.81.5
@@ -277,6 +286,31 @@ importers:
       vazirmatn:
         specifier: 33.0.3
         version: 33.0.3
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/social:
+    dependencies:
+      '@seo/connectors':
+        specifier: workspace:*
+        version: link:../connectors
+      '@seo/core':
+        specifier: workspace:*
+        version: link:../core
+      '@seo/db':
+        specifier: workspace:*
+        version: link:../db
+      '@seo/seo-data':
+        specifier: workspace:*
+        version: link:../seo-data
       zod:
         specifier: ^3.24.1
         version: 3.25.76

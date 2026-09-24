@@ -12,6 +12,7 @@ export default defineConfig({
       "@seo/pipeline": path.resolve(root, "packages/pipeline/src/index.ts"),
       "@seo/browser": path.resolve(root, "packages/browser/src/index.ts"),
       "@seo/seo-data": path.resolve(root, "packages/seo-data/src/index.ts"),
+      "@seo/social": path.resolve(root, "packages/social/src/index.ts"),
     },
   },
   test: {

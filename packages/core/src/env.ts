@@ -58,6 +58,13 @@ const schema = z.object({
    * its own under Settings → Integrations, which takes precedence.
    */
   PAGESPEED_API_KEY: z.string().optional(),
+  /**
+   * Instagram API with Instagram Login (Meta app → Instagram → "API setup with
+   * Instagram login": the Instagram app ID and secret). Without both, Instagram
+   * connection reports not_configured and nothing is shown.
+   */
+  META_APP_ID: z.string().regex(/^\d{5,30}$/, "must be the numeric Instagram app ID").optional(),
+  META_APP_SECRET: z.string().min(16).optional(),
   /** Pages per project measured by a PageSpeed run (each is two API calls: mobile and desktop). */
   PAGESPEED_MAX_URLS: z.coerce.number().int().min(1).max(50).default(10),
 

@@ -3,16 +3,34 @@ import { z } from "zod";
 import { db, projects, connectors } from "@seo/db";
 import { assertPublicUrl, recordAudit } from "@seo/core";
 import { refreshPlatform } from "@seo/connectors";
+import { socialAccounts } from "@seo/social";
 import { handler } from "../../../lib/route";
 import { listProjects } from "../../../lib/queries";
 
-const createSchema = z.object({
-  name: z.string().min(1).max(120),
-  baseUrl: z.string().trim().max(2000).url().refine((u) => /^https?:\/\//i.test(u), "must be an http(s) URL"),
-  locale: z.enum(["fa", "en"]).default("fa"),
-  pageCap: z.coerce.number().int().min(1).max(50_000).default(2000),
-  crawlRate: z.coerce.number().int().min(1).max(50).default(8),
-});
+const createSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    /** WEBSITE (default) crawls baseUrl; INSTAGRAM and TELEGRAM are connected accounts, never crawled. */
+    kind: z.enum(["WEBSITE", "INSTAGRAM", "TELEGRAM"]).default("WEBSITE"),
+    baseUrl: z.string().trim().max(2000).url().refine((u) => /^https?:\/\//i.test(u), "must be an http(s) URL").optional(),
+    /** Social projects: the @username (display only until the account is connected). */
+    handle: z
+      .string()
+      .trim()
+      .transform((v) => v.replace(/^@/, ""))
+      .pipe(z.string().regex(/^[A-Za-z0-9._]{2,32}$/, "must be a username"))
+      .optional(),
+    locale: z.enum(["fa", "en"]).default("fa"),
+    pageCap: z.coerce.number().int().min(1).max(50_000).default(2000),
+    crawlRate: z.coerce.number().int().min(1).max(50).default(8),
+  })
+  .refine((b) => b.kind !== "WEBSITE" || Boolean(b.baseUrl), { message: "baseUrl is required for a website", path: ["baseUrl"] });
+
+/** A social project's address is its public profile, for display; nothing fetches it. */
+function socialBaseUrl(kind: "INSTAGRAM" | "TELEGRAM", handle: string | undefined): string {
+  if (kind === "INSTAGRAM") return handle ? `https://www.instagram.com/${handle}/` : "https://www.instagram.com/";
+  return handle ? `https://t.me/${handle}` : "https://t.me/";
+}
 
 export const GET = handler({ permission: "project:read" }, async ({ session }) => ({
   projects: await listProjects(session.orgId),
@@ -21,10 +39,11 @@ export const GET = handler({ permission: "project:read" }, async ({ session }) =
 export const POST = handler(
   { permission: "project:write", schema: createSchema },
   async ({ session, body, actor }) => {
-    const baseUrl = storedBaseUrl(body.baseUrl);
+    const social = body.kind !== "WEBSITE" ? body.kind : null;
+    const baseUrl = social ? socialBaseUrl(social, body.handle) : storedBaseUrl(body.baseUrl!);
     // Refused here with a clear 400 BLOCKED_ADDRESS; the crawler checks every
     // fetch again, since DNS can change after the project is created.
-    await assertPublicUrl(baseUrl);
+    if (!social) await assertPublicUrl(baseUrl);
 
     const project = (
       await db
@@ -32,6 +51,7 @@ export const POST = handler(
         .values({
           orgId: session.orgId,
           name: body.name,
+          kind: body.kind,
           baseUrl,
           locale: body.locale,
           pageCap: body.pageCap,
@@ -39,6 +59,20 @@ export const POST = handler(
         })
         .returning()
     )[0]!;
+
+    if (social) {
+      // The account row exists from the start, so the social screens always have something to show.
+      await socialAccounts.ensureAccount(project.id, social);
+      await recordAudit({
+        orgId: session.orgId,
+        actor,
+        action: "project.create",
+        targetType: "project",
+        targetId: project.id,
+        metadata: { kind: project.kind, baseUrl: project.baseUrl },
+      });
+      return NextResponse.json({ project }, { status: 201 });
+    }
 
     // Every connector kind gets a row up front, so the Connectors screen is a
     // complete list of what is possible rather than only what exists.

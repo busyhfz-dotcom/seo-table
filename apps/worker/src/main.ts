@@ -16,12 +16,14 @@ import {
   PAGESPEED_QUEUE,
   RANK_QUEUE,
   REPORT_QUEUE,
+  SOCIAL_QUEUE,
   auditJobId,
   auditQueue,
   childLogger,
   closeQueues,
   closeRedis,
   commandReady,
+  enqueueSocialPublish,
   env,
   logger,
   metric,
@@ -38,6 +40,8 @@ import {
   type PageSpeedJobData,
   type RankJobData,
   type ReportJobData,
+  type SocialPublishJobData,
+  type SocialSyncJobData,
 } from "@seo/core";
 import { closeDb, pingDb, pool } from "@seo/db";
 import { BrowserManager } from "@seo/browser";
@@ -52,6 +56,7 @@ import {
   runReportJob,
   scheduleService,
 } from "@seo/seo-data";
+import { planner, pollTelegramChannels, runSocialPublishJob, runSocialSyncJob } from "@seo/social";
 import { browserApi } from "./browser-api.js";
 
 process.env.SERVICE_NAME ??= "seo-worker";
@@ -64,6 +69,7 @@ let fixWorker: Worker<FixJobData> | undefined;
 const dataWorkers: Worker[] = [];
 let reaperTimer: NodeJS.Timeout | undefined;
 let schedulerTimer: NodeJS.Timeout | undefined;
+let publisherTimer: NodeJS.Timeout | undefined;
 /** Created on the first browser request; Chromium itself starts only when a session or render needs it. */
 let browserManager: BrowserManager | undefined;
 
@@ -76,6 +82,8 @@ const REAP_EVERY_MS = 5 * 60_000;
 const REAP_STALE_MINUTES = 15;
 const MIGRATION_WAIT_MS = 3 * 60_000;
 const SCHEDULER_EVERY_MS = 60_000;
+/** Planned posts go out within this long of their time. */
+const PUBLISHER_EVERY_MS = 30_000;
 /** BullMQ states in which a job will still run (or is running). */
 const ALIVE_STATES = new Set(["active", "waiting", "delayed", "prioritized", "waiting-children"]);
 
@@ -181,6 +189,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     clearInterval(reaperTimer);
     clearInterval(schedulerTimer);
+    clearInterval(publisherTimer);
     server.close();
     // Browser sessions end with the process; closing Chromium properly frees its
     // temp profiles instead of leaving them to the container.
@@ -383,6 +392,15 @@ dataWorkers.push(
     },
     { ...dataOpts, concurrency: 4, lockDuration: 60_000 },
   ),
+  // Instagram / Telegram: "sync" (profile, posts, metrics, audit, alerts) and
+  // "publish" (one planned post; the publisher's claim makes a repeat a no-op).
+  new Worker<SocialSyncJobData | SocialPublishJobData>(
+    SOCIAL_QUEUE,
+    async (job) =>
+      job.name === "publish" ? runSocialPublishJob(job.data as SocialPublishJobData) : runSocialSyncJob(job.data as SocialSyncJobData),
+    // Long lock: publishing a reel waits for Instagram to process the video.
+    { ...dataOpts, concurrency: 2, lockDuration: 600_000 },
+  ),
   // PDF reports print with the same Chromium as the in-panel browser (one at a time: memory).
   new Worker<ReportJobData>(REPORT_QUEUE, async (job) => runReportJob(job.data, (html, opts) => browser().pdf(html, opts)), {
     ...dataOpts,
@@ -409,6 +427,30 @@ async function runSchedules(): Promise<void> {
 }
 void runSchedules();
 schedulerTimer = setInterval(() => void runSchedules(), SCHEDULER_EVERY_MS);
+
+// ---- social publisher ---------------------------------------------------------
+// Every tick: interrupted publishes are reported (never re-sent), due posts are
+// queued as publish jobs, and channels without a webhook (local development) are
+// polled for new posts.
+let publishing = false;
+async function runPublisher(): Promise<void> {
+  if (publishing || shuttingDown) return;
+  publishing = true;
+  try {
+    const queued = await planner.publishDue(new Date(), {
+      dispatch: (postId, projectId) =>
+        enqueueSocialPublish({ postId, projectId, requestedBy: "scheduler", correlationId: `publish-${postId}` }),
+    });
+    if (queued.length > 0) log.info({ queued: queued.length }, "due posts queued for publishing");
+    await pollTelegramChannels();
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "publisher tick failed");
+  } finally {
+    publishing = false;
+  }
+}
+void runPublisher();
+publisherTimer = setInterval(() => void runPublisher(), PUBLISHER_EVERY_MS);
 
 /**
  * A job can fail without its processor's catch running: BullMQ fails a job that

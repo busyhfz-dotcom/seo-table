@@ -19,7 +19,7 @@ import {
   type Project,
 } from "@seo/db";
 import { BadRequest, Conflict, NotFound, decodeSitemapBody, env, guardedFetch, normalizeUrl, proposalService, type Actor } from "@seo/core";
-import { forProject, resolveWriteTarget } from "@seo/connectors";
+import { forProject, resolveWriteTarget, type ResolvedWriteTarget } from "@seo/connectors";
 import type { Deps } from "./deps.js";
 import { daysAgo } from "./text.js";
 
@@ -219,7 +219,8 @@ export async function gscPages(
 // ---------------------------------------------------------------- applying changes
 
 export type ApplyTarget = {
-  target: "WORDPRESS" | "CLOUDFLARE";
+  /** A social project (0009) resolves to its own account. */
+  target: ResolvedWriteTarget["kind"];
   connected: boolean;
   supported: boolean;
   notes: string[];
