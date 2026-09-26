@@ -1,9 +1,0 @@
-node_modules
-.next
-.env
-.env.*
-dist
-build
-coverage
-*.log
-.DS_Store
