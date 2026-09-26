@@ -8,6 +8,7 @@
  */
 import { cache } from "react";
 import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { and, db, eq, fixProposals, inArray, projects, seoIssues, sql, type Project } from "@seo/db";
 import { DEFAULT_LOCALE, dirOf, isLocale, translator, type Locale, type T } from "./i18n";
 import { requireSession, type Session } from "./auth";
@@ -99,4 +100,14 @@ export function withProject(href: string, projectId: string | null | undefined):
   const sp = new URLSearchParams(query);
   sp.set("project", projectId);
   return `${path}?${sp.toString()}`;
+}
+
+/**
+ * Website screens (crawl audit, keywords, connect site, …) mean nothing for an
+ * Instagram page or a Telegram channel; a link or bookmark to one lands on the
+ * profile's own overview instead.
+ */
+export async function websiteOnly(): Promise<void> {
+  const { project, requestedProjectId } = await pageContext();
+  if (project && project.kind !== "WEBSITE") redirect(withProject("/social", requestedProjectId));
 }

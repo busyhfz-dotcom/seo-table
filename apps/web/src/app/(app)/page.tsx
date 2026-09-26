@@ -10,13 +10,18 @@ import { describeAction, iconForAction } from "../../lib/activity";
 import { runErrorLabel } from "../../lib/labels";
 import { ScanButton } from "./scan-button";
 import { GrowthCards } from "./growth-cards";
+import { SocialDashboard } from "./social/dashboard";
+import { socialCtx } from "./social/load";
+import { SOCIAL } from "./social/strings";
+import { COMMON } from "../../lib/common-strings";
 
 export const dynamic = "force-dynamic";
 
 const SEVERITY_TONE = { CRITICAL: "crit", SERIOUS: "serious", WARNING: "warn", INFO: "info" } as const;
 
 export default async function DashboardPage() {
-  const { t, locale, session, project, requestedProjectId } = await pageContext();
+  const pc = await pageContext();
+  const { t, locale, session, project, requestedProjectId } = pc;
   const [data, sys] = await Promise.all([dashboard(session.orgId, project?.id), health()]);
   const href = (path: string) => withProject(path, requestedProjectId);
 
@@ -33,6 +38,36 @@ export default async function DashboardPage() {
                 {t("new_project")}
               </Link>
             </Empty>
+          </Card>
+        </div>
+      </>
+    );
+  }
+
+  // An Instagram page or Telegram channel is never crawled: its own cards replace the website's.
+  const social = socialCtx(pc);
+  if (social) {
+    return (
+      <>
+        <TopBar title={t("dashboard")} />
+        <div className="view">
+          <SocialDashboard ctx={social} s={SOCIAL[locale]} c={COMMON[locale]} />
+          <Card title={t("agent_activity")}>
+            {data.activity.length === 0 ? (
+              <Empty>{t("nothing_here")}</Empty>
+            ) : (
+              <ul className="feed">
+                {data.activity.map((entry, i) => (
+                  <li key={i}>
+                    <span className="ic">
+                      <Icon name={iconForAction(entry.action)} />
+                    </span>
+                    <span>{describeAction(entry.action, entry.actorType, entry.metadata, locale)}</span>
+                    <time>{relative(entry.createdAt, locale)}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
       </>

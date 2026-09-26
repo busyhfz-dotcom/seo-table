@@ -3,7 +3,7 @@ import { categoryLabel, fixTitle, readableUrl, ruleTitle } from "../../../lib/la
 import { TopBar } from "../../../components/shell";
 import { Card, Empty, Sev, Status, Table } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext, withProject } from "../../../lib/page";
+import { pageContext, withProject, websiteOnly } from "../../../lib/page";
 import { getIssue, issueCategories, listIssues } from "../../../lib/queries";
 import { dateTime, num, pathOf, relative } from "../../../lib/format";
 import type { Severity } from "@seo/db";
@@ -25,6 +25,7 @@ export default async function IssuesPage({
     page?: string;
   }>;
 }) {
+  await websiteOnly();
   const params = await searchParams;
   const { t, locale, project, requestedProjectId } = await pageContext();
 

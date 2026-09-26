@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { websiteOnly } from "../../../../lib/page";
 import { contentService } from "@seo/seo-data";
 import { isAppError } from "@seo/core";
 import { TopBar } from "../../../../components/shell";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 /** The content editor for one document, with its live analysis and WordPress publishing. */
 export default async function ContentEditorPage({ params }: { params: Promise<{ docId: string }> }) {
+  await websiteOnly();
   const { docId } = await params;
   const { t, locale, project, c, allowed, href } = await screenContext();
   if (!project) return <NoProject title={t("content")} text={c.no_project} action={c.add_site} />;

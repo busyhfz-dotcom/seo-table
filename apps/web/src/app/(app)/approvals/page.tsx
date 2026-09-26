@@ -1,5 +1,6 @@
 import { TopBar } from "../../../components/shell";
-import { actionLabel, fixTitle, fixWhy, roleLabel, ruleTitle } from "../../../lib/labels";
+import { actionLabel, fixTitle, fixWhy, roleLabel } from "../../../lib/labels";
+import { anyRuleTitle } from "../../../lib/social-labels";
 import { Card, Diff, Empty, Note, RiskPill, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
@@ -79,7 +80,7 @@ export default async function ApprovalsPage() {
                       <p style={{ color: "var(--ink-2)", fontSize: 12.5, marginBottom: 12 }}>
                         <span style={{ color: "var(--ink-3)" }}>{t("why")}: </span>
                         {fixWhy(proposal.action, proposal.rationale, locale) ??
-                          (issue ? ruleTitle(issue.ruleId, issue.title, locale) : null)}
+                          (issue ? anyRuleTitle(issue.ruleId, issue.title, locale) : null)}
                       </p>
                     )}
 

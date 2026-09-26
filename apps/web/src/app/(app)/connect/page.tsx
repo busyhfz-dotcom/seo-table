@@ -3,7 +3,7 @@ import { can } from "@seo/core";
 import { TopBar } from "../../../components/shell";
 import { Card, Empty } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext, withProject } from "../../../lib/page";
+import { pageContext, withProject, websiteOnly } from "../../../lib/page";
 import { ConnectScreen } from "./connect-screen";
 import { connectStrings } from "./keys";
 import { loadConnection } from "./load";
@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
  * plugin — and chooses which connection writes the fixes.
  */
 export default async function ConnectPage() {
+  await websiteOnly();
   const { t, locale, session, project, requestedProjectId } = await pageContext();
 
   if (!project) {

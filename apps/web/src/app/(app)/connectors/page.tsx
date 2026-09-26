@@ -2,7 +2,7 @@ import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { Card, Empty, Note, Rich, Status } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext, withProject } from "../../../lib/page";
+import { pageContext, withProject, websiteOnly } from "../../../lib/page";
 import { listConnectors } from "../../../lib/queries";
 import { connectorLabel } from "../../../lib/labels";
 import { can } from "@seo/core";
@@ -54,6 +54,7 @@ const ICONS: Record<string, string> = {
 const SITE_KINDS = new Set(["WORDPRESS", "CLOUDFLARE"]);
 
 export default async function ConnectorsPage() {
+  await websiteOnly();
   const { t, locale, session, project, requestedProjectId } = await pageContext();
 
   if (!project) {

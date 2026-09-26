@@ -12,6 +12,6 @@ export { startInstagramOAuth, completeInstagramOAuth, createState, verifyState }
 export { syncProject, ingestTelegramMessages, pollTelegramUpdates, type SyncResult } from "./sync.js";
 export { handleTelegramWebhook } from "./webhook.js";
 export { runSocialSyncJob, runSocialPublishJob, pollTelegramChannels, type SocialSyncOutcome } from "./jobs.js";
-export { socialReasonText } from "./reasons.js";
+export { SOCIAL_REASON_CODES, socialReasonText } from "./reasons.js";
 export { SOCIAL_RULES, socialRule, socialScore } from "./audit.js";
 export * as socialText from "./text.js";

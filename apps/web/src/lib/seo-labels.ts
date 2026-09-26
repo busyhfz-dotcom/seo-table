@@ -23,9 +23,29 @@ export const ALERT_KIND_LABELS: Record<string, Pair> = {
   page_down: { fa: "از دسترس خارج شدن سایت", en: "Site down" },
   cwv_regression: { fa: "افت سرعت صفحه", en: "Page speed regression" },
   index_drop: { fa: "کاهش صفحات دیده‌شده در گوگل", en: "Fewer pages seen in Google" },
+  follower_drop: { fa: "افت دنبال‌کننده یا عضو", en: "Follower or member drop" },
+  engagement_drop: { fa: "افت تعامل یا نرخ بازدید", en: "Engagement or view-rate drop" },
+  token_expiring: { fa: "نزدیک شدن انقضای اتصال اینستاگرام", en: "Instagram connection expiring" },
+  publish_failed: { fa: "انتشار ناموفق پست", en: "Post failed to publish" },
 };
 
 export const ALERT_KIND_HELP: Record<string, Pair> = {
+  follower_drop: {
+    fa: "وقتی تعداد دنبال‌کنندگان یا اعضا نسبت به هفت روز قبل دست‌کم به اندازه‌ی آستانه (درصد) کم شود.",
+    en: "When followers or members fall by at least the threshold (percent) against seven days earlier.",
+  },
+  engagement_drop: {
+    fa: "وقتی نرخ تعامل (اینستاگرام) یا نرخ بازدید (تلگرام) ۱۰ پست اخیر دست‌کم به اندازه‌ی آستانه (درصد) از ۱۰ پست قبل کمتر باشد.",
+    en: "When the engagement rate (Instagram) or view rate (Telegram) of the last 10 posts is at least the threshold (percent) below the 10 before.",
+  },
+  token_expiring: {
+    fa: "وقتی اتصال اینستاگرام در کمتر از آستانه (روز) منقضی می‌شود و تمدید خودکار نشده است؛ باید دوباره وصل کنید.",
+    en: "When the Instagram connection expires within the threshold (days) and could not be renewed automatically; reconnect it.",
+  },
+  publish_failed: {
+    fa: "وقتی پست برنامه‌ریزی‌شده‌ای منتشر نشود یا معلوم نباشد منتشر شده است یا نه.",
+    en: "When a planned post could not be published, or it is unknown whether it went out.",
+  },
   score_drop: {
     fa: "وقتی امتیاز سایت نسبت به اسکن موفق قبلی دست‌کم به اندازه‌ی آستانه (امتیاز) کم شود.",
     en: "When the site score falls by at least the threshold (points) since the previous successful scan.",
@@ -60,6 +80,10 @@ export const ALERT_THRESHOLD_UNIT: Record<string, Pair | null> = {
   page_down: null,
   cwv_regression: { fa: "امتیاز", en: "points" },
   index_drop: { fa: "درصد", en: "percent" },
+  follower_drop: { fa: "درصد", en: "percent" },
+  engagement_drop: { fa: "درصد", en: "percent" },
+  token_expiring: { fa: "روز", en: "days" },
+  publish_failed: null,
 };
 
 export const CHANNEL_LABELS: Record<string, Pair> = {
@@ -74,6 +98,7 @@ export const SCHEDULE_KIND_LABELS: Record<string, Pair> = {
   pagespeed: { fa: "سنجش سرعت صفحه", en: "Page speed check" },
   competitors: { fa: "تحلیل رقبا", en: "Competitor analysis" },
   report: { fa: "گزارش مدیریتی PDF", en: "Executive PDF report" },
+  social_sync: { fa: "همگام‌سازی صفحه و ممیزی", en: "Profile sync and audit" },
 };
 
 export const CWV_RATING: Record<string, Pair & { tone: string }> = {

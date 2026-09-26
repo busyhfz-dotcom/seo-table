@@ -25,9 +25,18 @@ export type AlertsCtx = {
   telegram: boolean;
   integrations: string | null;
   initialTab: Tab;
+  projectKind: "WEBSITE" | "INSTAGRAM" | "TELEGRAM";
 };
 
-const KINDS = ["score_drop", "new_critical", "rank_drop", "page_down", "cwv_regression", "index_drop"];
+const WEBSITE_KINDS = ["score_drop", "new_critical", "rank_drop", "page_down", "cwv_regression", "index_drop"];
+/** Instagram pages and Telegram channels are never crawled; their own alerts replace the website's. */
+const SOCIAL_KINDS = ["follower_drop", "engagement_drop", "publish_failed"];
+
+function kindsFor(kind: AlertsCtx["projectKind"]): string[] {
+  if (kind === "WEBSITE") return WEBSITE_KINDS;
+  // Only an Instagram connection expires; a Telegram bot token does not.
+  return kind === "INSTAGRAM" ? [...SOCIAL_KINDS, "token_expiring"] : SOCIAL_KINDS;
+}
 
 export function AlertsScreen({ ctx, s, c, bell }: { ctx: AlertsCtx; s: AlertStrings; c: CommonStrings; bell: { markRead: string; open: string } }) {
   const [tab, setTab] = useState<Tab>(ctx.initialTab);
@@ -357,6 +366,7 @@ function RuleCard({
 
 function NewRule({ ctx, s, c, base, defaults, onCreated }: { ctx: AlertsCtx; s: AlertStrings; c: CommonStrings; base: string; defaults: Record<string, number | null>; onCreated: (secret: string | null) => void }) {
   const { locale } = ctx;
+  const KINDS = kindsFor(ctx.projectKind);
   const [kind, setKind] = useState(KINDS[0]!);
   const [form, setForm] = useState<{ threshold: string; channels: Channel[]; webhookUrl: string }>({ threshold: "", channels: ["in_app"], webhookUrl: "" });
   const create = useAction(locale);

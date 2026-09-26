@@ -1,4 +1,5 @@
 import { TopBar } from "../../../components/shell";
+import { websiteOnly } from "../../../lib/page";
 import { dataSources } from "../../../lib/seo-data";
 import { NoProject, countryOptions, screenContext } from "../../../lib/screen";
 import { KEYWORDS } from "./strings";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
  * that is not connected leaves its columns empty with an explanation.
  */
 export default async function KeywordsPage() {
+  await websiteOnly();
   const { t, locale, project, c, allowed, links } = await screenContext();
   const s = KEYWORDS[locale];
   if (!project) return <NoProject title={t("keywords")} text={c.no_project} action={c.add_site} />;

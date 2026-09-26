@@ -203,6 +203,11 @@ export const ACTION_LABELS: Record<string, Pair> = {
   SCHEMA_MARKUP: { fa: "نشانه‌گذاری ساختاریافته", en: "Structured data" },
   ROBOTS_TXT: { fa: "فایل robots.txt", en: "robots.txt file" },
   SITEMAP_XML: { fa: "فایل نقشه‌ی سایت", en: "Sitemap file" },
+  SOCIAL_PROFILE_NAME: { fa: "نام پروفایل", en: "Profile name" },
+  SOCIAL_BIO: { fa: "بیوی پروفایل", en: "Profile bio" },
+  SOCIAL_POST: { fa: "انتشار پست", en: "Publishing a post" },
+  SOCIAL_TITLE: { fa: "عنوان کانال تلگرام", en: "Telegram channel title" },
+  SOCIAL_DESCRIPTION: { fa: "توضیحات کانال تلگرام", en: "Telegram channel description" },
 };
 
 /** What each fix does, in the reader's language. Numbers live in the UI, not here. */
@@ -221,9 +226,19 @@ export const FIX_TITLES: Record<string, Pair> = {
   SCHEMA_MARKUP: { fa: "افزودن نشانه‌گذاری ساختاریافته (JSON-LD) به صفحه", en: "Add structured data (JSON-LD) to the page" },
   ROBOTS_TXT: { fa: "جایگزینی فایل robots.txt", en: "Replace the robots.txt file" },
   SITEMAP_XML: { fa: "انتشار نقشه‌ی سایت ساخته‌شده از اسکن", en: "Publish the sitemap built from the scan" },
+  SOCIAL_TITLE: { fa: "به‌روزرسانی عنوان کانال", en: "Update the channel title" },
+  SOCIAL_DESCRIPTION: { fa: "به‌روزرسانی توضیحات کانال", en: "Update the channel description" },
 };
 
 export const FIX_WHY: Record<string, Pair> = {
+  SOCIAL_TITLE: {
+    fa: "عنوان کانال مهم‌ترین متنی است که جست‌وجوی تلگرام می‌بیند؛ عنوان پیشنهادی کلیدواژه‌ی هدف را دارد. ربات آن را پس از تأیید شما تغییر می‌دهد و قابل بازگشت است.",
+    en: "The channel title is what Telegram search weighs most; the suggested title carries the target keyword. The bot changes it after your approval, and it can be rolled back.",
+  },
+  SOCIAL_DESCRIPTION: {
+    fa: "توضیحات در صفحه‌ی معرفی کانال و پیش‌نمایش لینک دیده می‌شود؛ متن پیشنهادی موضوع، کلیدواژه و دعوت به اقدام را دارد. ربات آن را پس از تأیید شما تغییر می‌دهد و قابل بازگشت است.",
+    en: "The description shows on the channel's info page and in link previews; the suggested text names the topic, the keyword and a call to action. The bot changes it after your approval, and it can be rolled back.",
+  },
   REDIRECT: { fa: "هر هاپ اضافه سیگنال را کم و بارگذاری را کند می‌کند.", en: "Each hop loses signal and slows the first byte." },
   URL_CHANGE: { fa: "نامک فعلی هیچ کلمه‌ای ندارد و چیزی به کاربر یا موتور جستجو نمی‌گوید.", en: "The slug carries no words, so neither people nor search engines learn anything from it." },
   PAGE_MERGE: { fa: "این دو نشانی برای یک عبارت با هم رقابت می‌کنند.", en: "These URLs compete for the same query." },
@@ -262,6 +277,8 @@ export function fixTitle(action: string, fallback: string, locale: Locale): stri
 }
 
 export function fixWhy(action: string, fallback: string | null, locale: Locale): string | null {
+  // A social proposal's stored rationale holds both languages; its own wording is used in either.
+  if (action.startsWith("SOCIAL_") && FIX_WHY[action]) return FIX_WHY[action]![locale];
   if (locale === "en") return fallback;
   return FIX_WHY[action]?.fa ?? fallback;
 }
@@ -380,6 +397,8 @@ export function targetTypeLabel(type: string | null, locale: Locale): string {
         integration: { fa: "سرویس", en: "Integration" },
         content_document: { fa: "سند محتوا", en: "Content document" },
         report: { fa: "گزارش", en: "Report" },
+        social_competitor: { fa: "رقیب شبکه‌ی اجتماعی", en: "Social competitor" },
+        scheduled_post: { fa: "پست برنامه‌ریزی‌شده", en: "Planned post" },
       },
       type,
       locale,

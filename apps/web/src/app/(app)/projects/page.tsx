@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { Card, Empty, Status, Table, UserText } from "../../../components/ui";
-import { Icon } from "../../../components/icons";
+import { Icon, kindIcon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
 import { listProjects } from "../../../lib/queries";
 import { num, relative } from "../../../lib/format";
@@ -44,9 +44,13 @@ export default async function ProjectsPage() {
               {projects.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <Link href={`/?project=${p.id}`} style={{ fontWeight: 500 }}>
+                    <Link href={`/?project=${p.id}`} className="row" style={{ fontWeight: 500, gap: 6, flexWrap: "nowrap" }}>
+                      <span className={`kind-ic sm ${p.kind.toLowerCase()}`} title={t(`kind_${p.kind}` as never)}>
+                        <Icon name={kindIcon(p.kind)} />
+                      </span>
                       <UserText>{p.name}</UserText>
                     </Link>
+                    <span className="sr-only">{t(`kind_${p.kind}` as never)}</span>
                     <div className="path" dir="ltr">
                       {p.baseUrl.replace(/^https?:\/\//, "")}
                     </div>
@@ -61,7 +65,7 @@ export default async function ProjectsPage() {
                     {p.lastRun ? relative(p.lastRun.queuedAt, locale) : "—"}
                   </td>
                   <td style={{ textAlign: "end" }}>
-                    <Link className="btn ghost sm" href={`/audit?project=${p.id}`} aria-label={`${t("details")}: ${p.name}`}>
+                    <Link className="btn ghost sm" href={p.kind === "WEBSITE" ? `/audit?project=${p.id}` : `/social/audit?project=${p.id}`} aria-label={`${t("details")}: ${p.name}`}>
                       {t("details")}
                     </Link>
                   </td>

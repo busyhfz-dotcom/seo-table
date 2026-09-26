@@ -2,7 +2,7 @@ import { TopBar } from "../../../components/shell";
 import { categoryLabel, ruleTitle } from "../../../lib/labels";
 import { Card, Empty, Note, Sev, Status, Table, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { pageContext } from "../../../lib/page";
+import { pageContext, websiteOnly } from "../../../lib/page";
 import { dashboard, listIssues } from "../../../lib/queries";
 import { dateTime, duration, num } from "../../../lib/format";
 import { COMMON } from "../../../lib/common-strings";
@@ -18,6 +18,7 @@ export const dynamic = "force-dynamic";
  * endpoint exports row for row.
  */
 export default async function ReportsPage() {
+  await websiteOnly();
   const { t, locale, session, project } = await pageContext();
 
   if (!project) {

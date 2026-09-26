@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { websiteOnly } from "../../../lib/page";
 import { TopBar } from "../../../components/shell";
 import { NoProject, screenContext } from "../../../lib/screen";
 import { TOOLS, type ToolStrings } from "./strings";
@@ -15,6 +16,7 @@ export async function ToolFrame({
 }: {
   render: (args: { ctx: ScreenCtx; s: ToolStrings; project: NonNullable<ScreenCtx["project"]> }) => ReactNode | Promise<ReactNode>;
 }) {
+  await websiteOnly();
   const ctx = await screenContext();
   const { t, locale, project, c, requestedProjectId } = ctx;
   if (!project) return <NoProject title={t("tools")} text={c.no_project} action={c.add_site} />;

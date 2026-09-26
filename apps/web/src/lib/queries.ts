@@ -75,6 +75,11 @@ export async function getProject(orgId: string, projectId: string): Promise<Proj
   return rows[0] ?? null;
 }
 
+/** Every project's id, name and kind, for the top bar's project picker. */
+export async function projectChoices(orgId: string): Promise<Array<{ id: string; name: string; kind: string }>> {
+  return db.select({ id: projects.id, name: projects.name, kind: projects.kind }).from(projects).where(eq(projects.orgId, orgId)).orderBy(projects.name);
+}
+
 /** The project a screen shows when the user has not picked one. */
 export async function defaultProject(orgId: string): Promise<Project | null> {
   const rows = await db

@@ -1,4 +1,5 @@
 import { TopBar } from "../../../components/shell";
+import { websiteOnly } from "../../../lib/page";
 import { dataSources } from "../../../lib/seo-data";
 import { NoProject, countryOptions, screenContext } from "../../../lib/screen";
 import { COMPETITORS } from "./strings";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
  * organization has set it up.
  */
 export default async function CompetitorsPage() {
+  await websiteOnly();
   const { t, locale, project, c, allowed, links } = await screenContext();
   if (!project) return <NoProject title={t("competitors")} text={c.no_project} action={c.add_site} />;
   const sources = await dataSources(project);

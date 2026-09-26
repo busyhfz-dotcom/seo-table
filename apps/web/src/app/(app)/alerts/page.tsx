@@ -31,6 +31,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             telegram: telegram.configured,
             integrations: links.integrations,
             initialTab: tab,
+            projectKind: project.kind,
           }}
         />
       </div>

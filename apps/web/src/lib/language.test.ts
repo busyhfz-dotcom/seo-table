@@ -39,6 +39,7 @@ import { SCHEMA_ENUMS, SCHEMA_FIELDS, TOOLS } from "../app/(app)/tools/strings";
 import { REPORTS } from "../app/(app)/reports/strings";
 import { ALERTS } from "../app/(app)/alerts/strings";
 import { INTEGRATIONS } from "../app/(app)/settings/integrations-strings";
+import { SOCIAL } from "../app/(app)/social/strings";
 
 const KEEP_LATIN = [
   "SEO Table", "WordPress", "Cloudflare", "Search Console", "Google", "GA4", "API", "REST", "URL", "HTML", "HTTP",
@@ -51,6 +52,8 @@ const KEEP_LATIN = [
   // SEO data features: vendors, Google's metric names and file formats.
   "DataForSEO", "PageSpeed Insights", "PageSpeed", "Core Web Vitals", "Lighthouse", "INP", "FCP", "TBT", "CSS",
   "Googlebot", "Bingbot", "PDF", "H3",
+  // Instagram / Telegram screens.
+  "Telegram",
 ].sort((a, b) => b.length - a.length);
 
 /** What is left of a Persian string once code, placeholders, file names and allowed names are removed. */
@@ -135,6 +138,7 @@ describe("SEO data screens' wording", () => {
     REPORTS,
     ALERTS,
     INTEGRATIONS,
+    SOCIAL,
   };
 
   it("has both languages for every key, Persian clean and English free of Persian", () => {
@@ -174,8 +178,8 @@ describe("SEO data screens' wording", () => {
     for (const unit of Object.values(ALERT_THRESHOLD_UNIT)) if (unit) persianClean("unit", unit.fa);
   });
 
-  it("names the site-document fix actions", () => {
-    for (const action of ["SCHEMA_MARKUP", "ROBOTS_TXT", "SITEMAP_XML"]) {
+  it("names the site-document and social fix actions", () => {
+    for (const action of ["SCHEMA_MARKUP", "ROBOTS_TXT", "SITEMAP_XML", "SOCIAL_TITLE", "SOCIAL_DESCRIPTION"]) {
       for (const table of [ACTION_LABELS, FIX_TITLES, FIX_WHY]) expect(table[action], action).toBeDefined();
     }
   });

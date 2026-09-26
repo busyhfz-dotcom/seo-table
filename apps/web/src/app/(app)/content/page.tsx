@@ -2,7 +2,7 @@ import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { Card, Empty, Note, Sev, Table, UserText } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
-import { withProject } from "../../../lib/page";
+import { withProject, websiteOnly } from "../../../lib/page";
 import { listConnectors, listOpportunities } from "../../../lib/queries";
 import { decimal, num, pct, relative } from "../../../lib/format";
 import { readableUrl, suggestedActionLabel } from "../../../lib/labels";
@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic";
  * keyword list.
  */
 export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  await websiteOnly();
   const params = await searchParams;
   const ctx = await screenContext();
   const { t, locale, project, c, allowed, href } = ctx;

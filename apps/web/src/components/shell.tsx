@@ -1,66 +1,98 @@
 import { pageContext } from "../lib/page";
 import { userOrgs } from "../lib/auth";
 import { OrgSwitcher } from "./org-switcher";
+import { ProjectSwitcher } from "./project-switcher";
+import { projectChoices } from "../lib/queries";
 import { Bell } from "./notifications";
 import { NavLinks, NavStateProvider, NavSync, type NavCounts, type NavGroup } from "./nav";
 import type { Locale, T } from "../lib/i18n";
+import type { ProjectKind } from "@seo/db";
 
 export type { NavCounts } from "./nav";
 
-const GROUPS: Array<{ group: string; items: Array<{ href: string; key: string; icon: string; count?: keyof NavCounts; orgWide?: boolean }> }> =
-  [
-    {
-      group: "nav_overview",
-      items: [
-        { href: "/", key: "dashboard", icon: "dash" },
-        { href: "/projects", key: "projects", icon: "folder", count: "projects", orgWide: true },
-      ],
-    },
-    {
-      group: "nav_health",
-      items: [
-        { href: "/audit", key: "audit", icon: "pulse" },
-        { href: "/issues", key: "issues", icon: "alert", count: "issues" },
-        { href: "/fixes", key: "fixes", icon: "wand", count: "fixes" },
-        { href: "/approvals", key: "approvals", icon: "shield", count: "approvals" },
-      ],
-    },
-    {
-      group: "nav_growth",
-      items: [
-        { href: "/keywords", key: "keywords", icon: "trend" },
-        { href: "/content", key: "content", icon: "pen" },
-        { href: "/competitors", key: "competitors", icon: "users" },
-        { href: "/pagespeed", key: "pagespeed", icon: "gauge" },
-      ],
-    },
-    {
-      group: "nav_technical",
-      items: [
-        { href: "/tools", key: "tools", icon: "code" },
-        { href: "/browser", key: "browser", icon: "browser" },
-      ],
-    },
-    {
-      group: "nav_connect",
-      items: [
-        { href: "/connect", key: "connect_site", icon: "link" },
-        { href: "/connectors", key: "connectors", icon: "plug" },
-        { href: "/onboarding", key: "onboarding", icon: "rocket" },
-      ],
-    },
-    {
-      group: "nav_monitor",
-      items: [
-        { href: "/reports", key: "reports", icon: "doc" },
-        { href: "/alerts", key: "alerts", icon: "bell" },
-      ],
-    },
-    {
-      group: "nav_system",
-      items: [{ href: "/settings", key: "settings", icon: "gear", orgWide: true }],
-    },
-  ];
+type Kind = ProjectKind;
+const WEB: Kind[] = ["WEBSITE"];
+const SOCIAL: Kind[] = ["INSTAGRAM", "TELEGRAM"];
+
+/**
+ * `kinds` limits an item to projects of those kinds: a website is crawled and
+ * connected to its CMS or CDN, an Instagram page or Telegram channel is synced
+ * through its platform, so each shows only the screens that mean something for
+ * it. Fixes and approvals stay for Telegram, whose title and description
+ * changes go through them.
+ */
+const GROUPS: Array<{
+  group: string;
+  items: Array<{ href: string; key: string; icon: string; count?: keyof NavCounts; orgWide?: boolean; kinds?: Kind[] }>;
+}> = [
+  {
+    group: "nav_overview",
+    items: [
+      { href: "/", key: "dashboard", icon: "dash" },
+      { href: "/projects", key: "projects", icon: "folder", count: "projects", orgWide: true },
+    ],
+  },
+  {
+    group: "nav_profile",
+    items: [
+      { href: "/social", key: "social", icon: "user", kinds: SOCIAL },
+      { href: "/social/audit", key: "social_audit", icon: "pulse", kinds: SOCIAL },
+      { href: "/social/analytics", key: "social_analytics", icon: "trend", kinds: SOCIAL },
+      { href: "/social/posts", key: "social_posts", icon: "list", kinds: SOCIAL },
+    ],
+  },
+  {
+    group: "nav_health",
+    items: [
+      { href: "/audit", key: "audit", icon: "pulse", kinds: WEB },
+      { href: "/issues", key: "issues", icon: "alert", count: "issues", kinds: WEB },
+      { href: "/fixes", key: "fixes", icon: "wand", count: "fixes", kinds: ["WEBSITE", "TELEGRAM"] },
+      { href: "/approvals", key: "approvals", icon: "shield", count: "approvals", kinds: ["WEBSITE", "TELEGRAM"] },
+    ],
+  },
+  {
+    group: "nav_publish",
+    items: [
+      { href: "/social/planner", key: "social_planner", icon: "calendar", kinds: SOCIAL },
+      { href: "/social/competitors", key: "competitors", icon: "users", kinds: SOCIAL },
+    ],
+  },
+  {
+    group: "nav_growth",
+    items: [
+      { href: "/keywords", key: "keywords", icon: "trend", kinds: WEB },
+      { href: "/content", key: "content", icon: "pen", kinds: WEB },
+      { href: "/competitors", key: "competitors", icon: "users", kinds: WEB },
+      { href: "/pagespeed", key: "pagespeed", icon: "gauge", kinds: WEB },
+    ],
+  },
+  {
+    group: "nav_technical",
+    items: [
+      { href: "/tools", key: "tools", icon: "code", kinds: WEB },
+      { href: "/browser", key: "browser", icon: "browser", kinds: WEB },
+    ],
+  },
+  {
+    group: "nav_connect",
+    items: [
+      { href: "/connect", key: "connect_site", icon: "link", kinds: WEB },
+      { href: "/connectors", key: "connectors", icon: "plug", kinds: WEB },
+      { href: "/onboarding", key: "onboarding", icon: "rocket" },
+    ],
+  },
+  {
+    group: "nav_monitor",
+    items: [
+      { href: "/reports", key: "reports", icon: "doc", kinds: WEB },
+      { href: "/alerts", key: "alerts", icon: "bell" },
+    ],
+  },
+  {
+    group: "nav_system",
+    items: [{ href: "/settings", key: "settings", icon: "gear", orgWide: true }],
+  },
+];
 
 function groups(t: T): NavGroup[] {
   return GROUPS.map((g) => ({
@@ -71,6 +103,7 @@ function groups(t: T): NavGroup[] {
       icon: item.icon,
       ...(item.count ? { count: item.count } : {}),
       ...(item.orgWide ? { orgWide: true } : {}),
+      ...(item.kinds ? { kinds: item.kinds } : {}),
     })),
   }));
 }
@@ -81,9 +114,9 @@ function groups(t: T): NavGroup[] {
  * between pages.
  */
 export async function Shell({ children }: { children: React.ReactNode }) {
-  const { t, locale, counts, requestedProjectId } = await pageContext();
+  const { t, locale, counts, requestedProjectId, project } = await pageContext();
   return (
-    <NavStateProvider initial={{ counts, projectId: requestedProjectId }} locale={locale}>
+    <NavStateProvider initial={{ counts, projectId: requestedProjectId, kind: project?.kind ?? null }} locale={locale}>
       <div className="shell">
         <aside className="nav">
           <div className="brand">
@@ -107,13 +140,13 @@ export async function Shell({ children }: { children: React.ReactNode }) {
 const ORG_SCOPED_PARAMS = ["project", "run", "issue", "new", "wp", "connect"];
 
 export async function TopBar({ title, right }: { title: string; right?: React.ReactNode }) {
-  const { t, locale, pathname, search, session, counts, requestedProjectId } = await pageContext();
+  const { t, locale, pathname, search, session, counts, requestedProjectId, project } = await pageContext();
   // Client navigations fetch the page with an internal `_rsc` cache-buster; it
   // must not end up in the address the language switch returns to.
   const hereParams = new URLSearchParams(search);
   hereParams.delete("_rsc");
   const here = `${pathname}${[...hereParams.keys()].length ? `?${hereParams.toString()}` : ""}`;
-  const orgs = session.via === "session" ? await userOrgs(session.userId) : [];
+  const [orgs, choices] = await Promise.all([session.via === "session" ? userOrgs(session.userId) : Promise.resolve([]), projectChoices(session.orgId)]);
 
   // After switching organization the old project/run ids mean nothing, so the
   // switch returns to the same screen without them.
@@ -124,12 +157,21 @@ export async function TopBar({ title, right }: { title: string; right?: React.Re
   return (
     <div className="topbar">
       {/* This page's project and counts, for the sidebar the layout rendered. */}
-      <NavSync counts={counts} projectId={requestedProjectId} locale={locale} />
+      <NavSync counts={counts} projectId={requestedProjectId} kind={project?.kind ?? null} locale={locale} />
       <div className="crumb">
         {t("product")} <span style={{ opacity: 0.4 }}>/</span> <b>{title}</b>
       </div>
       <span className="spacer" />
       {right}
+      <ProjectSwitcher
+        projects={choices}
+        current={project?.id ?? null}
+        labels={{
+          title: t("project_switch"),
+          all: t("project_all"),
+          kinds: { WEBSITE: t("kind_WEBSITE"), INSTAGRAM: t("kind_INSTAGRAM"), TELEGRAM: t("kind_TELEGRAM") },
+        }}
+      />
       {orgs.length > 1 && (
         <OrgSwitcher
           orgs={orgs.map((o) => ({ id: o.orgId, name: o.name }))}

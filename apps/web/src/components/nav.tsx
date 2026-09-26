@@ -18,9 +18,10 @@ import { num } from "../lib/format";
 import type { Locale } from "../lib/i18n";
 
 export type NavCounts = { projects?: number; issues?: number; fixes?: number; approvals?: number };
-type NavState = { counts: NavCounts; projectId: string | null };
+/** kind: the project on screen (the default project when none is named); null before any exists. */
+type NavState = { counts: NavCounts; projectId: string | null; kind: string | null };
 
-export type NavItem = { href: string; label: string; icon: string; count?: keyof NavCounts; orgWide?: boolean };
+export type NavItem = { href: string; label: string; icon: string; count?: keyof NavCounts; orgWide?: boolean; kinds?: string[] };
 export type NavGroup = { label: string; items: NavItem[] };
 
 const Ctx = createContext<{ state: NavState; set: (s: NavState) => void; locale: Locale } | null>(null);
@@ -50,11 +51,11 @@ export function NavStateProvider({ initial, locale, children }: { initial: NavSt
 }
 
 /** Rendered by every page's TopBar: publishes that page's project and counts. */
-export function NavSync({ counts, projectId, locale }: NavState & { locale: Locale }) {
+export function NavSync({ counts, projectId, kind, locale }: NavState & { locale: Locale }) {
   const ctx = useContext(Ctx);
   const set = ctx?.set;
   const layoutLocale = ctx?.locale;
-  const key = JSON.stringify({ counts, projectId });
+  const key = JSON.stringify({ counts, projectId, kind });
   useEffect(() => {
     set?.(JSON.parse(key) as NavState);
   }, [key, set]);
@@ -66,7 +67,19 @@ export function NavSync({ counts, projectId, locale }: NavState & { locale: Loca
 
 export function NavLinks({ groups, locale, label }: { groups: NavGroup[]; locale: Locale; label: string }) {
   const pathname = usePathname();
-  const state = useContext(Ctx)?.state ?? { counts: {}, projectId: null };
+  const state = useContext(Ctx)?.state ?? { counts: {}, projectId: null, kind: null };
+  // Before any project exists the website screens are listed: onboarding starts there.
+  const kind = state.kind ?? "WEBSITE";
+  const shown = groups
+    .map((g) => ({ ...g, items: g.items.filter((item) => !item.kinds || item.kinds.includes(kind)) }))
+    .filter((g) => g.items.length > 0);
+  // The most specific item wins: "/social" must not stay lit on "/social/audit",
+  // and "/connect" must not light up on "/connectors".
+  const matches = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
+  const activeHref = shown
+    .flatMap((g) => g.items.map((i) => i.href))
+    .filter(matches)
+    .sort((a, b) => b.length - a.length)[0];
   const active = useRef<HTMLAnchorElement | null>(null);
 
   // On a phone the sidebar is one horizontally scrolling strip; keep the page
@@ -81,13 +94,11 @@ export function NavLinks({ groups, locale, label }: { groups: NavGroup[]; locale
 
   return (
     <nav className="navitems" aria-label={label}>
-      {groups.map((group) => (
+      {shown.map((group) => (
         <div key={group.label} className="navsec">
           <div className="navgroup">{group.label}</div>
           {group.items.map((item) => {
-            // "/connect" must not light up on "/connectors".
-            const isActive =
-              item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const isActive = item.href === activeHref;
             const count = item.count ? state.counts[item.count] : undefined;
             const href =
               state.projectId && !item.orgWide

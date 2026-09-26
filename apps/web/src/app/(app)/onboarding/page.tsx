@@ -7,6 +7,11 @@ import { num } from "../../../lib/format";
 import { connectStrings } from "../connect/keys";
 import { loadConnection } from "../connect/load";
 import { Wizard } from "./wizard";
+import { socialAccounts } from "@seo/social";
+import { SOCIAL } from "../social/strings";
+import { COMMON } from "../../../lib/common-strings";
+import { instagramRedirectUri, socialCtx } from "../social/load";
+import { SocialOnboarding } from "../social/onboarding";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +34,11 @@ export default async function OnboardingPage({
   searchParams: Promise<{ new?: string; wp?: string; connect?: string }>;
 }) {
   const params = await searchParams;
-  const { t, locale, session, project: current } = await pageContext();
+  const pc = await pageContext();
+  const { t, locale, session, project: current } = pc;
 
   const project = params.new === "1" ? null : current;
+  if (project && project.kind !== "WEBSITE") return <SocialSteps />;
   const [view, firstRun] = project ? await Promise.all([loadConnection(project, locale), latestRunFor(project.id)]) : [null, null];
   const status = (kind: string) => view?.methods.find((m) => m.kind === kind)?.status;
   // Connected enough to write: the edge installed, or WordPress connected.
@@ -75,6 +82,7 @@ export default async function OnboardingPage({
           view={view}
           project={project ? { id: project.id, name: project.name, pageCap: project.pageCap, crawlRate: project.crawlRate } : null}
           s={connectStrings(t)}
+          ss={SOCIAL[locale]}
           canWrite={can(session.role, "connector:write")}
           canRun={can(session.role, "scan:run")}
         />
@@ -90,6 +98,52 @@ export default async function OnboardingPage({
 
         <Note tone="lock" icon="lock">
           {t("appr_lock")}
+        </Note>
+      </div>
+    </>
+  );
+}
+
+/**
+ * An Instagram page or Telegram channel: created → connected → first sync →
+ * audited, each read from the account and the project's score.
+ */
+async function SocialSteps() {
+  const pc = await pageContext();
+  const { t, locale, project } = pc;
+  const ctx = socialCtx(pc)!;
+  const s = SOCIAL[locale];
+  const account = await socialAccounts.getAccount(project!.id);
+  const done = {
+    1: true,
+    2: Boolean(account && account.status !== "NOT_CONNECTED"),
+    3: Boolean(account?.lastSyncAt),
+    4: project!.score !== null,
+  };
+  const now = !done[2] ? 2 : !done[3] ? 3 : 4;
+  const steps = [
+    { n: 1, label: s.ob_s1 },
+    { n: 2, label: s.ob_s2 },
+    { n: 3, label: s.ob_s3 },
+    { n: 4, label: s.ob_s4 },
+  ] as const;
+  return (
+    <>
+      <TopBar title={t("onboarding")} />
+      <div className="view">
+        <Card title={t("onboarding")} sub={t("step_of", { n: num(now, locale), m: num(4, locale) })}>
+          <div className="steps">
+            {steps.map((st) => (
+              <div key={st.n} className={`step${done[st.n] ? " done" : ""}${st.n === now && !done[st.n] ? " now" : ""}`}>
+                <span className="n">{done[st.n] ? "✓" : num(st.n, locale)}</span>
+                <span className="t">{st.label}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <SocialOnboarding ctx={ctx} s={s} c={COMMON[locale]} redirectUri={instagramRedirectUri()} />
+        <Note tone="lock" icon="lock">
+          {s.ob_lock}
         </Note>
       </div>
     </>

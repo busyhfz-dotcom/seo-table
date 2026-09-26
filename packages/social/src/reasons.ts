@@ -62,6 +62,9 @@ const TEXT: Record<string, LocalizedText> = {
   webhook_failed: { fa: "ثبت وبهوک تلگرام ناموفق بود؛ پست‌های جدید در همگام‌سازی بعدی خوانده می‌شوند.", en: "Registering the Telegram webhook failed; new posts are read on the next sync." },
 };
 
+/** Every reason with its own wording, for screens that translate codes they receive later (a failed post's error). */
+export const SOCIAL_REASON_CODES: readonly string[] = Object.keys(TEXT);
+
 export function socialReasonText(reason: string | null | undefined): LocalizedText | null {
   if (!reason) return null;
   if (TEXT[reason]) return TEXT[reason]!;

@@ -26,7 +26,21 @@ const DEFAULTS: SocialEndpoints = {
   telegramPreview: "https://t.me",
 };
 
-let current: SocialEndpoints = { ...DEFAULTS };
+/**
+ * Local end-to-end runs only: with ALLOW_PRIVATE_NETWORK=1 (never set in
+ * production, where the SSRF guard would refuse a local host anyway),
+ * SOCIAL_TEST_TELEGRAM_API and SOCIAL_TEST_TELEGRAM_PREVIEW point the running
+ * web and worker processes at the doubles in tests/fake-social.ts.
+ */
+function localOverrides(): Partial<SocialEndpoints> {
+  if (process.env.ALLOW_PRIVATE_NETWORK !== "1") return {};
+  const out: Partial<SocialEndpoints> = {};
+  if (process.env.SOCIAL_TEST_TELEGRAM_API) out.telegramApi = process.env.SOCIAL_TEST_TELEGRAM_API;
+  if (process.env.SOCIAL_TEST_TELEGRAM_PREVIEW) out.telegramPreview = process.env.SOCIAL_TEST_TELEGRAM_PREVIEW;
+  return out;
+}
+
+let current: SocialEndpoints = { ...DEFAULTS, ...localOverrides() };
 
 export function socialEndpoints(): SocialEndpoints {
   return current;

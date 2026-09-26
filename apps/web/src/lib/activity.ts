@@ -18,6 +18,11 @@ export function iconForAction(action: string): string {
   if (action.startsWith("auth")) return "user";
   if (action.startsWith("apikey")) return "key";
   if (action.startsWith("project")) return "folder";
+  if (action.startsWith("social.post")) return action === "social.post_failed" ? "alert" : "calendar";
+  if (action.startsWith("social.competitor")) return "users";
+  if (action === "social.audit") return "pulse";
+  if (action === "social.sync") return "refresh";
+  if (action.startsWith("social.")) return action.includes("failed") ? "alert" : "plug";
   return "info";
 }
 

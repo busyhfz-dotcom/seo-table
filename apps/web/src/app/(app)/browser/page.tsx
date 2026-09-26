@@ -1,6 +1,6 @@
 import { can } from "@seo/core";
 import { TopBar } from "../../../components/shell";
-import { pageContext } from "../../../lib/page";
+import { pageContext, websiteOnly } from "../../../lib/page";
 import { BrowserScreen } from "./browser-screen";
 import { BROWSER_KEYS, type BrowserStrings } from "./keys";
 
@@ -19,6 +19,7 @@ export default async function BrowserPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await websiteOnly();
   const { t, locale, session, project, requestedProjectId } = await pageContext();
   const params = await searchParams;
   const requested = typeof params.url === "string" ? params.url.trim().slice(0, 2048) : "";

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
 import { Bar, Card, Empty, Note, Status, Table, UserText } from "../../../components/ui";
-import { pageContext } from "../../../lib/page";
+import { pageContext, websiteOnly } from "../../../lib/page";
 import { getRun, issueCountsByUrl, latestRunFor, runPages } from "../../../lib/queries";
 import { dateTime, duration, num, pathOf, relative } from "../../../lib/format";
 import { categoryLabel, noindexLabel, readableUrl, ruleDescription, ruleName, runErrorLabel } from "../../../lib/labels";
@@ -18,6 +18,7 @@ export default async function AuditPage({
 }: {
   searchParams: Promise<{ run?: string; project?: string; tab?: string; page?: string }>;
 }) {
+  await websiteOnly();
   const params = await searchParams;
   const { t, locale, session, project: contextProject } = await pageContext();
   const tab: Tab = params.tab === "pages" ? "pages" : params.tab === "rules" ? "rules" : "overview";

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { TopBar } from "../../../components/shell";
-import { fixTitle, fixWhy, readableUrl, resultCodeLabel, ruleName } from "../../../lib/labels";
+import { fixTitle, fixWhy, readableUrl, resultCodeLabel } from "../../../lib/labels";
+import { anyRuleName } from "../../../lib/social-labels";
 import { Card, Diff, Empty, Note, RiskPill, Status } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { pageContext } from "../../../lib/page";
@@ -13,6 +14,8 @@ import { FixActions } from "./actions";
 import { FixPreview } from "./preview";
 import { previewable } from "./preview-fields";
 import { connectionOverview } from "@seo/connectors";
+import { socialAccounts } from "@seo/social";
+import type { Project } from "@seo/db";
 import { withProject } from "../../../lib/page";
 import { connectStrings } from "../connect/keys";
 
@@ -38,17 +41,15 @@ export default async function FixesPage() {
     );
   }
 
-  const [fixes, overview] = await Promise.all([
+  const [fixes, via] = await Promise.all([
     listFixes(project.id, ["DRAFT", "APPROVED", "APPLYING", "APPLIED", "FAILED", "ROLLED_BACK"]),
-    connectionOverview(project.id),
+    writeVia(project),
   ]);
   // Where Apply would write, and whether that connection can do each kind of fix.
-  const target = overview.writeTarget.effective;
-  const targetMethod = overview.methods.find((m) => m.kind === target);
-  const writable = targetMethod?.status === "connected";
-  const supported = new Set<string>(writable ? (targetMethod?.capabilities?.supportedActions ?? []) : []);
+  const { target, writable, supported } = via;
+  const website = project.kind === "WEBSITE";
   const strings = connectStrings(t);
-  const connectHref = withProject("/connect", requestedProjectId);
+  const connectHref = withProject(website ? "/connect" : "/social", requestedProjectId);
   const executions = await latestLiveExecutions(fixes.map((f) => f.id));
   const limits = policyLimits();
   const perms = {
@@ -98,7 +99,7 @@ export default async function FixesPage() {
                       <span className="num" style={{ color: "var(--ink)" }}>
                         {num(fix.targetCount, locale)}
                       </span>{" "}
-                      {t("pages")} · {ruleName(fix.ruleId, locale)}
+                      {t("pages")} · {anyRuleName(fix.ruleId, locale)}
                     </div>
 
                     {why && <p style={{ fontSize: 12.5, color: "var(--ink-2)", marginBottom: 12 }}>{why}</p>}
@@ -150,11 +151,11 @@ export default async function FixesPage() {
                     )}
 
                     <div className="via" style={{ marginTop: 12 }}>
-                      <Icon name={writable ? (target === "CLOUDFLARE" ? "cloud" : "globe") : "box"} />
+                      <Icon name={writable ? (target === "CLOUDFLARE" ? "cloud" : target === "TELEGRAM" ? "tg" : "globe") : "box"} />
                       {writable ? (
                         <>
                           <span>
-                            {t("fx_via")}: <b style={{ color: "var(--ink-2)", fontWeight: 500 }}>{t(`tg_${target}`)}</b>
+                            {t("fx_via")}: <b style={{ color: "var(--ink-2)", fontWeight: 500 }}>{t(`tg_${target}` as never)}</b>
                           </span>
                           {supported.has(fix.action) ? (
                             <span className="pill ok">
@@ -168,7 +169,7 @@ export default async function FixesPage() {
                                 {t("fx_unsupported")}
                               </span>
                               <Link href={connectHref} className="lnk">
-                                {t("connect_site")}
+                                {website ? t("connect_site") : t("social")}
                               </Link>
                             </>
                           )}
@@ -177,18 +178,22 @@ export default async function FixesPage() {
                         <>
                           <span>{t("fx_no_target")}</span>
                           <Link href={connectHref} className="lnk">
-                            {t("connect_site")}
+                            {website ? t("connect_site") : t("social")}
                           </Link>
-                          <span>·</span>
-                          <Link href={`${connectHref}#method-FIX_PACK`} className="lnk">
-                            {t("fx_manual")}
-                          </Link>
+                          {website && (
+                            <>
+                              <span>·</span>
+                              <Link href={`${connectHref}#method-FIX_PACK`} className="lnk">
+                                {t("fx_manual")}
+                              </Link>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
 
                     <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
-                      {previewable(changes) && (
+                      {website && previewable(changes) && (
                         <FixPreview changes={changes} projectId={project.id} locale={locale} s={strings} />
                       )}
                       <div style={{ flex: "1 1 auto" }}>
@@ -298,4 +303,23 @@ function Outcome({
       )}
     </div>
   );
+}
+
+/**
+ * Where Apply writes: a website's resolved connection, or a Telegram channel's
+ * admin bot (whose Change channel info right decides whether title and
+ * description changes can be applied). Instagram's API cannot apply any.
+ */
+async function writeVia(project: Project): Promise<{ target: string; writable: boolean; supported: Set<string> }> {
+  if (project.kind !== "WEBSITE") {
+    const account = await socialAccounts.getAccount(project.id);
+    const writable = project.kind === "TELEGRAM" && account?.status === "CONNECTED";
+    const canChange = Boolean(account?.profile.rights?.can_change_info);
+    return { target: project.kind, writable, supported: new Set(writable && canChange ? ["SOCIAL_TITLE", "SOCIAL_DESCRIPTION"] : []) };
+  }
+  const overview = await connectionOverview(project.id);
+  const target = overview.writeTarget.effective;
+  const method = overview.methods.find((m) => m.kind === target);
+  const writable = method?.status === "connected";
+  return { target, writable, supported: new Set<string>(writable ? (method?.capabilities?.supportedActions ?? []) : []) };
 }

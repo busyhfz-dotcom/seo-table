@@ -161,7 +161,30 @@ const PATHS: Record<string, ReactElement> = {
       <path d="M3 7l9 6 9-6" />
     </>
   ),
+  insta: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M17.5 6.5h.01" />
+    </>
+  ),
+  tg: <path d="M21 4 3 11l6 2.5M21 4l-3 16-6.5-5M21 4 9 13.5v5.5l2.5-3.5" />,
+  calendar: (
+    <>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+    </>
+  ),
+  pin: <path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v8" />,
+  hash: <path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16" />,
+  left: <path d="M15 5l-7 7 7 7" />,
+  right: <path d="M9 5l7 7-7 7" />,
 };
+
+/** The icon for a project of this kind. */
+export function kindIcon(kind: string | null | undefined): string {
+  return kind === "INSTAGRAM" ? "insta" : kind === "TELEGRAM" ? "tg" : "globe";
+}
 
 export type IconName = keyof typeof PATHS | string;
 
