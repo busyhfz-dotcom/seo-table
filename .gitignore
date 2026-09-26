@@ -1,9 +1,15 @@
 node_modules
+dist
 .next
+out
+*.tsbuildinfo
 .env
 .env.*
-dist
-build
-coverage
+!.env.example
 *.log
+coverage
 .DS_Store
+
+# Local Redis snapshots
+dump.rdb
+*.rdb

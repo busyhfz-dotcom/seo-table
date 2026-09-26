@@ -1,0 +1,76 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789936071948,
+      "tag": "0000_init_v04",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789936077909,
+      "tag": "0001_audit_pipeline_v04_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789937374256,
+      "tag": "0002_redirect_target",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789937375137,
+      "tag": "0003_append_only_purge_door",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790073769683,
+      "tag": "0004_hardening_heartbeat_session_org",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790089481472,
+      "tag": "0005_snapshot_depth_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790110746080,
+      "tag": "0006_edge_write_target_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790170489967,
+      "tag": "0007_seo_data_phase2",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790172558044,
+      "tag": "0008_content_schema_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790253342358,
+      "tag": "0009_social_profiles",
+      "breakpoints": true
+    }
+  ]
+}

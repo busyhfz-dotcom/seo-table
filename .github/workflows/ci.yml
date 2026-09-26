@@ -3,30 +3,104 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  validate:
+  verify:
+    name: Typecheck · lint · test · build · smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: seotable
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
     env:
-      DATABASE_URL: postgresql://seotable:seotable@localhost:5432/seotable
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/seotable
+      REDIS_URL: redis://localhost:6379
+      # CI-only values: generated per run, never real secrets.
+      ENCRYPTION_KEY: 3f6c2a1e9b7d4c5a8e0f1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6
+      SESSION_SECRET: ci-session-secret-ci-session-secret-ci-00
+      APP_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
+
+      - uses: pnpm/action-setup@v4
         with:
-          node-version: 22.23.2
-      - name: Use repository npm version
-        run: npm install --global npm@11.19.1
-      - name: Install
-        run: npm install
-      - name: Lint workspaces
-        run: npm run lint
-      - name: Validate Prisma schema
-        run: npm run db:validate
-      - name: Build crawler contracts
-        run: npm run build --workspace=@seo-table/crawler
-      - name: Build execution policy
-        run: npm run build --workspace=@seo-table/execution
+          version: 10.28.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm --filter @seo/web lint
+
+      - name: Migrate
+        run: pnpm db:migrate
+
+      - name: Migrations are idempotent
+        run: pnpm db:migrate
+
+      - name: Install Chromium for the browser tests
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: NODE_ENV=production pnpm --filter @seo/web build
+
+      - name: Smoke — start fixture site, worker and web
+        env:
+          # The fixture site is on 127.0.0.1, which the crawler's SSRF guard refuses otherwise.
+          ALLOW_PRIVATE_NETWORK: "1"
+        run: |
+          SEED_EMAIL=ci@example.com SEED_PASSWORD=ci-smoke-password pnpm exec tsx scripts/seed.ts
+          nohup pnpm exec tsx scripts/fixture-server.ts > fixture.log 2>&1 &
+          SERVICE_ROLE=worker PORT=3001 nohup sh scripts/start.sh > worker.log 2>&1 &
+          NODE_ENV=production SERVICE_ROLE=web PORT=3000 nohup sh scripts/start.sh > web.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf localhost:3000/api/ready && curl -sf localhost:3001/ready && exit 0
+            sleep 2
+          done
+          echo "web or worker did not become ready" >&2
+          exit 1
+
+      - name: Smoke — run
+        env:
+          ALLOW_PRIVATE_NETWORK: "1"
+        run: SMOKE_EMAIL=ci@example.com SMOKE_PASSWORD=ci-smoke-password SMOKE_SITE=http://127.0.0.1:4555 pnpm smoke
+
+      - name: Service logs
+        if: failure()
+        run: tail -n 200 web.log worker.log fixture.log || true

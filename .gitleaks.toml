@@ -1,0 +1,9 @@
+# The CI workflow uses throwaway, per-run values for ENCRYPTION_KEY and
+# SESSION_SECRET; they protect nothing and are allowed here explicitly so a real
+# secret anywhere else still fails the scan.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "CI-only placeholder values"
+paths = ['''.github/workflows/ci.yml''', '''.env.example''', '''tests/fake-wordpress.ts''']

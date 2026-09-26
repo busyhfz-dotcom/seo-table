@@ -1,0 +1,988 @@
+<title>SEO Table Console</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&family=Sora:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ============================================================
+   SEO Table — dark-committed design system
+   Single visual world (dark premium). Every color painted
+   explicitly from tokens; no theme inversion.
+   ============================================================ */
+:root{
+  /* ground — near-black with a green bias, not neutral grey */
+  --bg:#080B09;
+  --bg-2:#0D120F;
+  --surface:#121815;
+  --surface-2:#18201C;
+  --surface-3:#1E2823;
+  --border:#243029;
+  --border-strong:#314138;
+
+  /* ink */
+  --ink:#E8F1EC;
+  --ink-2:#A3B3AA;
+  --ink-3:#6D7E75;
+
+  /* accent — emerald neon, spent sparingly */
+  --acc:#2BE08A;
+  --acc-hi:#63F2AD;
+  --acc-dim:#0E9A5C;
+  --acc-08:rgba(43,224,138,.08);
+  --acc-14:rgba(43,224,138,.14);
+  --acc-24:rgba(43,224,138,.24);
+  --acc-ink:#062B18;
+
+  /* status — reserved, never used as a series hue */
+  --ok:#35D399;
+  --warn:#F3C24B;
+  --serious:#F79245;
+  --crit:#F0655E;
+  --info:#5BB8F5;
+  --ok-08:rgba(53,211,153,.10);
+  --warn-08:rgba(243,194,75,.10);
+  --serious-08:rgba(247,146,69,.10);
+  --crit-08:rgba(240,101,94,.10);
+  --info-08:rgba(91,184,245,.10);
+
+  --r-sm:6px; --r:10px; --r-lg:14px;
+  --sp:16px;
+  --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 28px -18px rgba(0,0,0,.9);
+
+  --f-fa:"Vazirmatn", system-ui, sans-serif;
+  --f-en:"Sora", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--f-fa); font-size:14px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+[dir="ltr"] body, body[data-lang="en"]{font-family:var(--f-en)}
+body[data-lang="en"]{font-size:13.5px}
+.num,td.num,.mono{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono);font-size:.86em}
+h1,h2,h3,h4{margin:0;font-weight:600;text-wrap:balance;letter-spacing:-.01em}
+p{margin:0}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:4px}
+::selection{background:var(--acc-24)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- shell ---------- */
+#shell{display:grid;grid-template-columns:248px 1fr;min-height:100%}
+aside{
+  background:var(--bg-2);border-inline-end:1px solid var(--border);
+  display:flex;flex-direction:column;gap:4px;padding:18px 12px;
+  position:sticky;top:env(safe-area-inset-top,0px);height:100vh;overflow:auto;
+}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 18px}
+.brand .mark{
+  width:30px;height:30px;border-radius:8px;flex:none;
+  background:linear-gradient(145deg,var(--acc),#0E9A5C);
+  display:grid;place-items:center;color:var(--acc-ink);font-weight:700;
+  font-family:var(--f-en);font-size:13px;box-shadow:0 0 0 1px rgba(43,224,138,.3), 0 6px 18px -10px var(--acc);
+}
+.brand b{font-family:var(--f-en);font-weight:600;font-size:15px;letter-spacing:-.02em}
+.brand span{display:block;font-size:10.5px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;font-family:var(--f-en)}
+.navgroup{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);padding:16px 10px 6px}
+.navbtn{
+  display:flex;align-items:center;gap:10px;width:100%;
+  padding:8px 10px;border-radius:var(--r);color:var(--ink-2);
+  transition:background .14s,color .14s;text-align:start;
+}
+.navbtn svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.navbtn:hover{background:var(--surface);color:var(--ink)}
+.navbtn[aria-current="page"]{background:var(--acc-08);color:var(--acc-hi);box-shadow:inset 0 0 0 1px var(--acc-24)}
+.navbtn .tag{margin-inline-start:auto;font-size:11px;background:var(--surface-3);color:var(--ink-2);border-radius:20px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.navbtn[aria-current="page"] .tag{background:var(--acc-24);color:var(--acc-hi)}
+
+main{min-width:0;display:flex;flex-direction:column}
+.topbar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:14px 24px;border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--bg) 88%,transparent);
+  position:sticky;top:env(safe-area-inset-top,0px);z-index:20;backdrop-filter:blur(8px);
+}
+.crumb{color:var(--ink-3);font-size:12.5px}
+.crumb b{color:var(--ink);font-weight:500}
+.spacer{margin-inline-start:auto}
+.view{padding:24px;display:flex;flex-direction:column;gap:20px;max-width:1320px;width:100%}
+
+/* ---------- controls ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border-radius:var(--r-sm);
+  background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--border-strong);
+  color:var(--ink);font-size:13px;transition:background .14s,box-shadow .14s;
+}
+.btn:hover{background:var(--surface-3)}
+.btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.btn.primary{background:var(--acc);color:var(--acc-ink);box-shadow:0 6px 18px -12px var(--acc);font-weight:600}
+.btn.primary:hover{background:var(--acc-hi)}
+.btn.ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--border)}
+.btn.ghost:hover{background:var(--surface)}
+.btn.danger{background:transparent;color:var(--crit);box-shadow:inset 0 0 0 1px rgba(240,101,94,.4)}
+.btn.danger:hover{background:var(--crit-08)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.seg{display:inline-flex;background:var(--surface);border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border);padding:2px}
+.seg button{padding:4px 11px;border-radius:4px;font-size:12.5px;color:var(--ink-3)}
+.seg button[aria-pressed="true"]{background:var(--surface-3);color:var(--ink)}
+.langsw button{font-family:var(--f-en);font-size:11.5px;letter-spacing:.04em}
+input,select{
+  font:inherit;font-size:13px;color:var(--ink);background:var(--bg-2);
+  border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 10px;width:100%;
+}
+input::placeholder{color:var(--ink-3)}
+input:focus,select:focus{border-color:var(--border-strong);outline:none;box-shadow:0 0 0 3px var(--acc-08)}
+label.field{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--ink-2)}
+.search{position:relative;max-width:300px;flex:1 1 180px}
+.search input{padding-inline-start:32px}
+.search svg{position:absolute;inset-inline-start:10px;top:9px;width:15px;height:15px;stroke:var(--ink-3);fill:none;stroke-width:1.7}
+
+/* ---------- surfaces ---------- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.card>header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--border)}
+.card>header h3{font-size:14px}
+.card>header .sub{font-size:12px;color:var(--ink-3)}
+.card .body{padding:18px}
+.grid{display:grid;gap:16px}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.split{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px}
+
+/* tiles: the only place big numerals are spent */
+.tile{padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.tile .k{font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.tile .v{font-family:var(--f-en);font-size:30px;font-weight:600;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.tile .foot{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+.delta{display:inline-flex;align-items:center;gap:3px;font-variant-numeric:tabular-nums;font-family:var(--f-en);font-size:12px}
+.delta.up{color:var(--ok)} .delta.down{color:var(--crit)}
+
+/* pills & chips */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.pill.ok{color:var(--ok);background:var(--ok-08);box-shadow:inset 0 0 0 1px rgba(53,211,153,.24)}
+.pill.warn{color:var(--warn);background:var(--warn-08);box-shadow:inset 0 0 0 1px rgba(243,194,75,.24)}
+.pill.serious{color:var(--serious);background:var(--serious-08);box-shadow:inset 0 0 0 1px rgba(247,146,69,.24)}
+.pill.crit{color:var(--crit);background:var(--crit-08);box-shadow:inset 0 0 0 1px rgba(240,101,94,.26)}
+.pill.info{color:var(--info);background:var(--info-08);box-shadow:inset 0 0 0 1px rgba(91,184,245,.24)}
+.pill.mute{color:var(--ink-2);background:var(--surface-3);box-shadow:inset 0 0 0 1px var(--border)}
+.pill.acc{color:var(--acc-hi);background:var(--acc-08);box-shadow:inset 0 0 0 1px var(--acc-24)}
+.pill svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* severity stripe encodes state in form, not only color */
+.sev{display:inline-flex;align-items:center;gap:7px;font-size:12.5px}
+.sev i{width:3px;height:14px;border-radius:2px;background:currentColor;display:block;flex:none}
+.sev.crit{color:var(--crit)} .sev.serious{color:var(--serious)}
+.sev.warn{color:var(--warn)} .sev.ok{color:var(--ok)} .sev.info{color:var(--info)}
+.sev span{color:var(--ink)}
+
+/* tables */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  text-align:start;font-weight:500;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--ink-3);padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap;
+}
+td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-2)}
+td .path{color:var(--ink-2);font-family:var(--f-mono);font-size:12px}
+.tnum{text-align:end;font-variant-numeric:tabular-nums;font-family:var(--f-en)}
+
+/* misc blocks */
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:13px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0}
+.bar{height:6px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:4px;background:var(--acc)}
+.note{
+  display:flex;gap:10px;padding:12px 14px;border-radius:var(--r);font-size:12.5px;line-height:1.7;
+  background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--border);color:var(--ink-2);
+}
+.note svg{width:16px;height:16px;flex:none;margin-top:2px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.note.lock{color:var(--warn);background:var(--warn-08);box-shadow:inset 0 0 0 1px rgba(243,194,75,.24)}
+.note.acc{color:var(--acc-hi);background:var(--acc-08);box-shadow:inset 0 0 0 1px var(--acc-24)}
+.diff{font-family:var(--f-mono);font-size:12px;border-radius:var(--r);overflow:hidden;box-shadow:inset 0 0 0 1px var(--border)}
+.diff div{padding:7px 12px;display:flex;gap:10px;align-items:flex-start}
+.diff .del{background:var(--crit-08);color:#F6A29D}
+.diff .add{background:var(--ok-08);color:#7FE3BC}
+.diff em{font-style:normal;opacity:.6;flex:none;width:12px;text-align:center}
+.empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:46px 20px;text-align:center;color:var(--ink-3)}
+.empty svg{width:28px;height:28px;stroke:var(--border-strong);fill:none;stroke-width:1.5}
+.feed{display:flex;flex-direction:column}
+.feed li{display:flex;gap:11px;padding:11px 0;border-bottom:1px solid var(--border);font-size:12.5px;list-style:none}
+.feed li:last-child{border-bottom:0}
+.feed .ic{width:24px;height:24px;border-radius:7px;flex:none;display:grid;place-items:center;background:var(--surface-3);color:var(--ink-2)}
+.feed .ic svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8}
+.feed time{color:var(--ink-3);font-size:11.5px;margin-inline-start:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
+ul.plain{margin:0;padding-inline-start:18px;color:var(--ink-2);font-size:12.5px;line-height:1.9}
+
+/* stepper */
+.steps{display:flex;gap:0;flex-wrap:wrap}
+.step{display:flex;align-items:center;gap:10px;padding:0 18px 0 0;flex:1 1 170px;min-width:0}
+.step .n{width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;font-family:var(--f-en);
+  background:var(--surface-3);color:var(--ink-3);box-shadow:inset 0 0 0 1px var(--border)}
+.step.done .n{background:var(--acc-14);color:var(--acc-hi);box-shadow:inset 0 0 0 1px var(--acc-24)}
+.step.now .n{background:var(--acc);color:var(--acc-ink);box-shadow:0 6px 18px -12px var(--acc)}
+.step .t{font-size:12.5px;color:var(--ink-3);min-width:0}
+.step.now .t,.step.done .t{color:var(--ink)}
+
+/* charts */
+.chart{width:100%;display:block;overflow:visible}
+.chart text{fill:var(--ink-3);font-size:10.5px;font-family:var(--f-en)}
+.chart .grid-l{stroke:var(--border);stroke-width:1}
+.tip{
+  position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--surface-3);box-shadow:inset 0 0 0 1px var(--border-strong),0 14px 30px -18px #000;
+  border-radius:var(--r-sm);padding:7px 10px;font-size:12px;white-space:nowrap;
+}
+.tip b{font-family:var(--f-en);font-variant-numeric:tabular-nums}
+.gauge-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.gauge-v{font-family:var(--f-en);font-size:40px;font-weight:600;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+
+/* responsive */
+@media (max-width:980px){
+  #shell{grid-template-columns:1fr}
+  aside{
+    position:static;height:auto;flex-direction:row;align-items:center;gap:6px;
+    overflow-x:auto;padding:10px 12px;border-inline-end:0;border-bottom:1px solid var(--border);
+  }
+  .brand{padding:0 12px 0 0;flex:none}
+  .brand span{display:none}
+  .navgroup{display:none}
+  .navbtn{width:auto;white-space:nowrap;flex:none}
+  .view{padding:18px 16px}
+  .topbar{padding:12px 16px}
+  .split,.g4,.g3,.g2{grid-template-columns:1fr}
+}
+@media (min-width:981px) and (max-width:1240px){
+  .g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:1fr}
+}
+</style>
+
+<div id="shell">
+  <aside id="nav"></aside>
+  <main>
+    <div class="topbar">
+      <div class="crumb" id="crumb"></div>
+      <div class="spacer"></div>
+      <div class="seg langsw" role="group" aria-label="Language">
+        <button id="fa" aria-pressed="true">فارسی</button>
+        <button id="en" aria-pressed="false">EN</button>
+      </div>
+      <button class="btn primary" id="scanBtn"></button>
+    </div>
+    <div class="view" id="view"></div>
+  </main>
+</div>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+"use strict";
+/* ============================ i18n ============================ */
+var D = {
+ fa:{
+  dir:"rtl", tagline:"کنسول سئو", scan:"اسکن جدید",
+  nav_setup:"راه‌اندازی", nav_analyze:"بررسی", nav_act:"اقدام", nav_system:"سیستم",
+  dashboard:"داشبورد", onboarding:"راه‌اندازی اولیه", projects:"پروژه‌ها", audit:"نتایج اسکن",
+  issues:"ایشوها", fixes:"اصلاح خودکار", approvals:"صف تأیید", content:"فرصت‌های محتوا",
+  connectors:"اتصال‌ها", reports:"گزارش‌ها", settings:"تنظیمات",
+  demo:"داده‌های این نمونه واقعی نیستند و فقط برای نمایش رابط کاربری‌اند.",
+  /* dashboard */
+  t_score:"امتیاز سئو", t_pages:"صفحات ایندکس‌شده", t_open:"ایشوهای باز", t_pending:"در انتظار تأیید",
+  vs_last:"نسبت به اسکن قبل", of_pages:"از ۱٬۸۴۲ صفحه خزش‌شده", since_fix:"از آخرین دور اصلاح", need_human:"نیازمند تصمیم انسان",
+  score_trend:"روند امتیاز سئو — ۳۰ روز گذشته", severity_dist:"ایشوهای باز بر اساس شدت",
+  recent_runs:"اسکن‌های اخیر", agent_activity:"فعالیت عامل",
+  health:"سلامت سیستم", queue_depth:"عمق صف", worker:"ورکر", crawler:"خزنده", db:"دیتابیس",
+  /* generic */
+  all:"همه", search:"جستجو", filter:"فیلتر", export:"خروجی", details:"جزئیات", view:"مشاهده",
+  status:"وضعیت", severity:"شدت", rule:"قاعده", category:"دسته", pages:"صفحه", occurrences:"تکرار",
+  first_seen:"اولین مشاهده", last_scan:"آخرین اسکن", score:"امتیاز", actions:"اقدام", risk:"ریسک",
+  approve:"تأیید", reject:"رد", review:"بازبینی", apply:"اعمال", preview:"پیش‌نمایش",
+  low_risk:"کم‌ریسک", sensitive:"حساس", blocked:"نیازمند تأیید", running:"در حال اجرا", queued:"در صف",
+  done:"تمام‌شده", failed:"ناموفق", applied:"اعمال‌شده", open:"باز", fixed:"اصلاح‌شده", ignored:"نادیده",
+  connected:"متصل", not_connected:"متصل نیست", ready:"آماده اتصال",
+  /* projects */
+  new_project:"پروژه جدید", proj_site:"سایت", proj_lang:"زبان", proj_pages:"صفحات", proj_issues:"ایشو",
+  /* audit */
+  run_header:"اجرای اسکن", crawled:"خزش‌شده", duration:"مدت", started:"شروع", indexable:"قابل ایندکس",
+  page_url:"نشانی صفحه", title_len:"طول عنوان", meta:"متا", h1:"H1", canon:"Canonical", issues_n:"ایشو",
+  tab_over:"نمای کلی", tab_pages:"صفحات", tab_rules:"قواعد", tab_log:"لاگ اجرا",
+  /* issues */
+  issue_detail:"جزئیات ایشو", affected:"صفحات درگیر", history:"تاریخچه (append-only)", suggested:"اصلاح پیشنهادی",
+  /* fixes */
+  fix_policy:"سیاست اجرای امن: هر اصلاح ابتدا dry-run می‌شود، حداکثر ۵۰ تغییر در هر اجرا، snapshot قبل از نوشتن، و rollback یک‌کلیکی.",
+  before:"قبل", after:"بعد", target:"هدف",
+  /* approvals */
+  appr_lock:"ریدایرکت، تغییر URL و ادغام صفحات هرگز بدون تأیید انسان اجرا نمی‌شوند — این قاعده در سطح سرور اعمال می‌شود، نه فقط در رابط کاربری.",
+  requested_by:"درخواست‌کننده", agent:"عامل خودکار", waiting:"در انتظار",
+  type_redirect:"ریدایرکت", type_url:"تغییر URL", type_merge:"ادغام صفحات", type_meta:"بازنویسی متا",
+  /* content */
+  query:"عبارت جستجو", impressions:"نمایش", clicks:"کلیک", ctr:"CTR", position:"میانگین رتبه",
+  gap:"شکاف", opportunity:"فرصت", action_sugg:"اقدام پیشنهادی",
+  /* connectors */
+  conn_note:"برای اینستاگرام و یوتیوب هیچ داده‌ای ساخته نمی‌شود. اینترفیس، مدل داده و مدیریت توکن آماده است و تا زمان اتصال OAuth واقعی، وضعیت «متصل نیست» می‌ماند.",
+  last_sync:"آخرین همگام‌سازی", scopes:"دسترسی‌ها", connect:"اتصال", manage:"مدیریت",
+  /* settings */
+  s_general:"عمومی", s_team:"تیم و نقش‌ها", s_safety:"سیاست اجرا", s_keys:"کلیدهای API", s_log:"لاگ حسابرسی",
+  role:"نقش", perm_read:"مشاهده", perm_scan:"اجرای اسکن", perm_fix:"اصلاح کم‌ریسک", perm_appr:"تأیید حساس", perm_billing:"مالی",
+  /* reports */
+  new_report:"گزارش جدید", schedule:"زمان‌بندی", format:"قالب", range:"بازه", recipients:"دریافت‌کنندگان",
+ },
+ en:{
+  dir:"ltr", tagline:"SEO Console", scan:"New scan",
+  nav_setup:"Setup", nav_analyze:"Analyze", nav_act:"Act", nav_system:"System",
+  dashboard:"Dashboard", onboarding:"Onboarding", projects:"Projects", audit:"Audit Results",
+  issues:"Issues", fixes:"Auto Fixes", approvals:"Approval Queue", content:"Content Opportunities",
+  connectors:"Connectors", reports:"Reports", settings:"Settings",
+  demo:"Figures in this prototype are examples, not real data.",
+  t_score:"SEO score", t_pages:"Indexed pages", t_open:"Open issues", t_pending:"Awaiting approval",
+  vs_last:"vs. previous scan", of_pages:"of 1,842 pages crawled", since_fix:"since last fix round", need_human:"need a human decision",
+  score_trend:"SEO score — last 30 days", severity_dist:"Open issues by severity",
+  recent_runs:"Recent scans", agent_activity:"Agent activity",
+  health:"System health", queue_depth:"Queue depth", worker:"Worker", crawler:"Crawler", db:"Database",
+  all:"All", search:"Search", filter:"Filter", export:"Export", details:"Details", view:"View",
+  status:"Status", severity:"Severity", rule:"Rule", category:"Category", pages:"Pages", occurrences:"Occurrences",
+  first_seen:"First seen", last_scan:"Last scan", score:"Score", actions:"Action", risk:"Risk",
+  approve:"Approve", reject:"Reject", review:"Review", apply:"Apply", preview:"Preview",
+  low_risk:"Low risk", sensitive:"Sensitive", blocked:"Approval required", running:"Running", queued:"Queued",
+  done:"Completed", failed:"Failed", applied:"Applied", open:"Open", fixed:"Fixed", ignored:"Ignored",
+  connected:"Connected", not_connected:"Not connected", ready:"Ready to connect",
+  new_project:"New project", proj_site:"Site", proj_lang:"Language", proj_pages:"Pages", proj_issues:"Issues",
+  run_header:"Scan run", crawled:"Crawled", duration:"Duration", started:"Started", indexable:"Indexable",
+  page_url:"Page URL", title_len:"Title length", meta:"Meta", h1:"H1", canon:"Canonical", issues_n:"Issues",
+  tab_over:"Overview", tab_pages:"Pages", tab_rules:"Rules", tab_log:"Run log",
+  issue_detail:"Issue detail", affected:"Affected pages", history:"History (append-only)", suggested:"Suggested fix",
+  fix_policy:"Execution safety policy: every fix is dry-run first, capped at 50 changes per run, snapshotted before write, and reversible in one click.",
+  before:"Before", after:"After", target:"Target",
+  appr_lock:"Redirects, URL changes and page merges never execute without human approval — enforced server-side, not just in the UI.",
+  requested_by:"Requested by", agent:"Agent", waiting:"Waiting",
+  type_redirect:"Redirect", type_url:"URL change", type_merge:"Page merge", type_meta:"Meta rewrite",
+  query:"Query", impressions:"Impressions", clicks:"Clicks", ctr:"CTR", position:"Avg. position",
+  gap:"Gap", opportunity:"Opportunity", action_sugg:"Suggested action",
+  conn_note:"Nothing is fabricated for Instagram and YouTube. The interface, data model and token handling are production-ready; they stay “not connected” until real OAuth is wired.",
+  last_sync:"Last sync", scopes:"Scopes", connect:"Connect", manage:"Manage",
+  s_general:"General", s_team:"Team & roles", s_safety:"Execution policy", s_keys:"API keys", s_log:"Audit log",
+  role:"Role", perm_read:"View", perm_scan:"Run scans", perm_fix:"Low-risk fixes", perm_appr:"Approve sensitive", perm_billing:"Billing",
+  new_report:"New report", schedule:"Schedule", format:"Format", range:"Range", recipients:"Recipients",
+ }
+};
+var S={lang:"fa",screen:"dashboard",tab:"tab_over",sTab:"s_general"};
+function t(k){return (D[S.lang][k]!==undefined?D[S.lang][k]:k)}
+function bi(o){return S.lang==="fa"?o.fa:o.en}
+function n(x){return S.lang==="fa"?Number(x).toLocaleString("fa-IR"):Number(x).toLocaleString("en-US")}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+
+/* ============================ icons ============================ */
+var I={
+ dash:'<path d="M3 13h7V3H3zM14 21h7V11h-7zM14 7h7V3h-7zM3 21h7v-4H3z"/>',
+ rocket:'<path d="M5 15l-2 6 6-2M9 15l-3-3a9 9 0 0 1 9-9h5v5a9 9 0 0 1-9 9z"/><circle cx="14.5" cy="9.5" r="1.5"/>',
+ folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+ pulse:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+ alert:'<path d="M12 3 2 20h20zM12 10v4M12 17h.01"/>',
+ wand:'<path d="M4 20l10-10M14 4l1.5 3L19 8.5 15.5 10 14 13l-1.5-3L9 8.5 12.5 7zM19 16l.8 1.7L21.5 18l-1.7.8L19 20.5l-.8-1.7L16.5 18l1.7-.3z"/>',
+ shield:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+ bulb:'<path d="M9 18h6M10 21h4M12 3a6 6 0 0 1 4 10.5V16H8v-2.5A6 6 0 0 1 12 3z"/>',
+ plug:'<path d="M9 3v6M15 3v6M6 9h12v3a6 6 0 0 1-12 0zM12 18v3"/>',
+ doc:'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ play:'<path d="M6 4l14 8-14 8z"/>',
+ check:'<path d="M4 12l5 5L20 6"/>',
+ x:'<path d="M6 6l12 12M18 6L6 18"/>',
+ lock:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 8h.01"/>',
+ dl:'<path d="M12 3v12M7 11l5 5 5-5M4 21h16"/>',
+ link:'<path d="M9 15l6-6M10 6l1-1a4 4 0 0 1 6 6l-1 1M14 18l-1 1a4 4 0 0 1-6-6l1-1"/>',
+ undo:'<path d="M4 10h10a5 5 0 0 1 0 10H8M4 10l4-4M4 10l4 4"/>',
+ clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/>',
+ eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+ box:'<path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'
+};
+function svg(k,cls){return '<svg viewBox="0 0 24 24" aria-hidden="true"'+(cls?' class="'+cls+'"':'')+'>'+I[k]+'</svg>'}
+
+/* ============================ nav ============================ */
+var NAV=[
+ {g:"nav_setup",items:[["onboarding","rocket",null]]},
+ {g:"nav_analyze",items:[["dashboard","dash",null],["projects","folder","3"],["audit","pulse",null],["issues","alert","128"]]},
+ {g:"nav_act",items:[["fixes","wand","24"],["approvals","shield","6"],["content","bulb","17"]]},
+ {g:"nav_system",items:[["connectors","plug",null],["reports","doc",null],["settings","gear",null]]}
+];
+function renderNav(){
+  var h='<div class="brand"><div class="mark">ST</div><div><b>SEO Table</b><span>'+t("tagline")+'</span></div></div>';
+  NAV.forEach(function(gr){
+    h+='<div class="navgroup">'+t(gr.g)+'</div>';
+    gr.items.forEach(function(it){
+      h+='<button class="navbtn" data-go="'+it[0]+'"'+(S.screen===it[0]?' aria-current="page"':'')+'>'+
+         svg(it[1])+'<span>'+t(it[0])+'</span>'+(it[2]?'<span class="tag">'+n(it[2])+'</span>':'')+'</button>';
+    });
+  });
+  document.getElementById("nav").innerHTML=h;
+}
+
+/* ============================ data (examples) ============================ */
+var TREND=[58,59,57,60,62,61,63,64,63,66,65,67,68,67,69,70,69,71,70,72,71,73,74,73,75,74,76,75,74,76];
+var SEVER=[{k:"crit",fa:"بحرانی",en:"Critical",v:9},{k:"serious",fa:"جدی",en:"Serious",v:23},
+           {k:"warn",fa:"هشدار",en:"Warning",v:54},{k:"info",fa:"اطلاعی",en:"Info",v:42}];
+var RUNS=[
+ {id:"run_9f31",proj:"shop.example.ir",st:"running",pages:812,dur:"۰۴:۱۲",durEn:"04:12",when:{fa:"همین حالا",en:"now"}},
+ {id:"run_9e02",proj:"shop.example.ir",st:"done",pages:1842,dur:"۰۹:۴۱",durEn:"09:41",when:{fa:"۳ ساعت پیش",en:"3h ago"}},
+ {id:"run_9d77",proj:"blog.example.ir",st:"done",pages:436,dur:"۰۲:۰۸",durEn:"02:08",when:{fa:"دیروز",en:"yesterday"}},
+ {id:"run_9d40",proj:"academy.example.com",st:"failed",pages:0,dur:"۰۰:۱۱",durEn:"00:11",when:{fa:"دیروز",en:"yesterday"}}
+];
+var ISSUES=[
+ {sev:"crit",rule:{fa:"noindex روی صفحه درآمدزا",en:"noindex on a revenue page"},cat:{fa:"ایندکس‌پذیری",en:"Indexability"},p:4,o:11,seen:{fa:"۶ روز پیش",en:"6d ago"},st:"open"},
+ {sev:"crit",rule:{fa:"canonical به صفحه حذف‌شده",en:"canonical points to a removed page"},cat:{fa:"Canonical",en:"Canonical"},p:7,o:19,seen:{fa:"۴ روز پیش",en:"4d ago"},st:"open"},
+ {sev:"serious",rule:{fa:"عنوان تکراری در چند صفحه",en:"Duplicate title across pages"},cat:{fa:"عنوان",en:"Title"},p:31,o:62,seen:{fa:"۱۲ روز پیش",en:"12d ago"},st:"open"},
+ {sev:"serious",rule:{fa:"صفحه یتیم بدون لینک داخلی",en:"Orphan page, no internal links"},cat:{fa:"لینک داخلی",en:"Internal links"},p:18,o:18,seen:{fa:"۹ روز پیش",en:"9d ago"},st:"open"},
+ {sev:"warn",rule:{fa:"متا دیسکریپشن بیش از ۱۶۰ کاراکتر",en:"Meta description over 160 chars"},cat:{fa:"متا",en:"Meta"},p:77,o:77,seen:{fa:"۱۸ روز پیش",en:"18d ago"},st:"open"},
+ {sev:"warn",rule:{fa:"تصویر بدون متن جانشین",en:"Image missing alt text"},cat:{fa:"دسترس‌پذیری",en:"Accessibility"},p:143,o:411,seen:{fa:"۲۱ روز پیش",en:"21d ago"},st:"open"},
+ {sev:"warn",rule:{fa:"بیش از یک H1 در صفحه",en:"More than one H1"},cat:{fa:"ساختار",en:"Structure"},p:22,o:22,seen:{fa:"۱۵ روز پیش",en:"15d ago"},st:"fixed"},
+ {sev:"info",rule:{fa:"صفحه در sitemap نیست",en:"Page missing from sitemap"},cat:{fa:"Sitemap",en:"Sitemap"},p:64,o:64,seen:{fa:"۲۴ روز پیش",en:"24d ago"},st:"open"}
+];
+var FIXES=[
+ {risk:"low",rule:{fa:"کوتاه‌سازی متا دیسکریپشن",en:"Trim meta description"},tgt:77,st:"applied",
+  b:{fa:"در این مقاله به‌صورت کامل و جامع بررسی می‌کنیم که چگونه می‌توانید با استفاده از روش‌های نوین …",en:"In this comprehensive article we will fully examine how you can, using modern methods, …"},
+  a:{fa:"روش‌های نوین بهینه‌سازی صفحات محصول برای افزایش نرخ کلیک در نتایج جستجو.",en:"Modern ways to optimize product pages for higher click-through in search results."}},
+ {risk:"low",rule:{fa:"افزودن alt به تصاویر محصول",en:"Add alt text to product images"},tgt:143,st:"queued",
+  b:{fa:'<img src="/p/1204.webp">',en:'<img src="/p/1204.webp">'},
+  a:{fa:'<img src="/p/1204.webp" alt="کتانی دویدن مردانه، مدل ۱۲۰۴، نمای جانبی">',en:'<img src="/p/1204.webp" alt="Men’s running shoe, model 1204, side view">'}},
+ {risk:"sensitive",rule:{fa:"بازنویسی عنوان صفحات دسته‌بندی",en:"Rewrite category page titles"},tgt:31,st:"blocked",
+  b:{fa:"<title>دسته‌بندی</title>",en:"<title>Category</title>"},
+  a:{fa:"<title>کتانی دویدن مردانه | فروشگاه مثال</title>",en:"<title>Men’s Running Shoes | Example Shop</title>"}},
+ {risk:"blocked",rule:{fa:"اصلاح canonical شکسته",en:"Repair broken canonical"},tgt:7,st:"blocked",
+  b:{fa:'<link rel="canonical" href="/p/old-901">',en:'<link rel="canonical" href="/p/old-901">'},
+  a:{fa:'<link rel="canonical" href="/p/901">',en:'<link rel="canonical" href="/p/901">'}}
+];
+var APPROVALS=[
+ {type:"type_redirect",sev:"crit",title:{fa:"۹ نشانی قدیمی به صفحه دسته‌بندی جدید هدایت شوند",en:"Redirect 9 legacy URLs to the new category page"},
+  why:{fa:"این نشانی‌ها ۴۰۴ می‌دهند و ۲٬۳۱۰ نمایش ماهانه از دست می‌رود.",en:"These URLs return 404 and lose 2,310 monthly impressions."},
+  b:"/shoes/men-running-2019",a:"/c/men-running  (301)",wait:{fa:"۲ روز",en:"2 days"}},
+ {type:"type_merge",sev:"crit",title:{fa:"ادغام دو صفحه با محتوای تکراری ۹۴٪",en:"Merge two pages with 94% duplicate content"},
+  why:{fa:"هر دو برای یک عبارت رقابت می‌کنند و رتبه یکدیگر را پایین می‌آورند.",en:"Both compete for one query and cannibalize each other."},
+  b:"/blog/seo-guide  +  /blog/seo-guide-2024",a:"/blog/seo-guide  (301 ← guide-2024)",wait:{fa:"۱ روز",en:"1 day"}},
+ {type:"type_url",sev:"serious",title:{fa:"تغییر اسلاگ ۴ صفحه محصول به ساختار جدید",en:"Change 4 product slugs to the new structure"},
+  why:{fa:"اسلاگ فعلی شامل شناسه عددی است و عبارت هدف در آن نیست.",en:"Current slugs carry a numeric id and omit the target term."},
+  b:"/p/1204",a:"/p/men-running-shoe-1204",wait:{fa:"۵ ساعت",en:"5h"}},
+ {type:"type_meta",sev:"warn",title:{fa:"بازنویسی عنوان ۳۱ صفحه دسته‌بندی",en:"Rewrite titles on 31 category pages"},
+  why:{fa:"عنوان‌ها تکراری‌اند و نام برند را ندارند.",en:"Titles are duplicated and drop the brand name."},
+  b:"<title>دسته‌بندی</title>",a:"<title>{{category}} | {{brand}}</title>",wait:{fa:"۹ ساعت",en:"9h"}}
+];
+var OPPS=[
+ {q:{fa:"کتانی دویدن مردانه",en:"men running shoes"},imp:48200,clk:1310,ctr:"2.7%",pos:8.4,gap:"serious",act:{fa:"ساخت صفحه دسته اختصاصی",en:"Create a dedicated category page"}},
+ {q:{fa:"بهترین کفش پیاده‌روی",en:"best walking shoes"},imp:31740,clk:640,ctr:"2.0%",pos:11.2,gap:"serious",act:{fa:"گسترش محتوا + لینک داخلی",en:"Expand content + internal links"}},
+ {q:{fa:"سایز کفش ورزشی",en:"sports shoe sizing"},imp:22910,clk:1890,ctr:"8.2%",pos:4.1,gap:"warn",act:{fa:"افزودن جدول سایز و FAQ",en:"Add a size table and FAQ"}},
+ {q:{fa:"کفش دویدن زنانه",en:"women running shoes"},imp:19430,clk:210,ctr:"1.1%",pos:17.6,gap:"crit",act:{fa:"صفحه موجود است اما ایندکس نشده",en:"Page exists but is not indexed"}},
+ {q:{fa:"کتانی مناسب ماراتن",en:"marathon running shoes"},imp:8120,clk:96,ctr:"1.2%",pos:21.3,gap:"warn",act:{fa:"محتوای راهنما بنویس",en:"Write a guide article"}}
+];
+var CONNS=[
+ {id:"wp",name:"WordPress",st:"connected",sync:{fa:"۱۲ دقیقه پیش",en:"12 min ago"},
+  scopes:{fa:"خواندن و نوشتن عنوان، متا، alt، ریدایرکت",en:"Read/write titles, meta, alt, redirects"},
+  note:{fa:"Application Password — نوشتن تابع سیاست اجرای امن است.",en:"Application Password — writes obey the execution safety policy."}},
+ {id:"gsc",name:"Search Console",st:"not",sync:null,
+  scopes:{fa:"عبارت‌های جستجو، نمایش، کلیک، وضعیت ایندکس",en:"Queries, impressions, clicks, index status"},
+  note:{fa:"نیازمند OAuth یا service account گوگل.",en:"Needs Google OAuth or a service account."}},
+ {id:"ga4",name:"GA4",st:"not",sync:null,
+  scopes:{fa:"نشست، کاربر، تبدیل بر اساس صفحه",en:"Sessions, users, conversions per page"},
+  note:{fa:"نیازمند property ID و دسترسی خواندن.",en:"Needs a property ID and read access."}},
+ {id:"ig",name:"Instagram",st:"ready",sync:null,
+  scopes:{fa:"بدون OAuth واقعی هیچ داده‌ای نمایش داده نمی‌شود",en:"No data is shown without real OAuth"},
+  note:{fa:"اینترفیس و مدیریت توکن آماده است؛ داده‌ای ساخته نمی‌شود.",en:"Interface and token handling ready; nothing is fabricated."}},
+ {id:"yt",name:"YouTube",st:"ready",sync:null,
+  scopes:{fa:"بدون OAuth واقعی هیچ داده‌ای نمایش داده نمی‌شود",en:"No data is shown without real OAuth"},
+  note:{fa:"اینترفیس و مدیریت توکن آماده است؛ داده‌ای ساخته نمی‌شود.",en:"Interface and token handling ready; nothing is fabricated."}}
+];
+var PROJECTS=[
+ {site:"shop.example.ir",lang:"fa",pages:1842,score:76,issues:128,st:"running",when:{fa:"همین حالا",en:"now"}},
+ {site:"blog.example.ir",lang:"fa",pages:436,score:84,issues:31,st:"done",when:{fa:"دیروز",en:"yesterday"}},
+ {site:"academy.example.com",lang:"en",pages:0,score:0,issues:0,st:"failed",when:{fa:"دیروز",en:"yesterday"}}
+];
+var PAGESROW=[
+ {u:"/",tl:54,meta:true,h1:1,canon:true,iss:0,idx:true},
+ {u:"/c/men-running",tl:71,meta:true,h1:1,canon:true,iss:2,idx:true},
+ {u:"/p/1204",tl:19,meta:false,h1:2,canon:false,iss:5,idx:true},
+ {u:"/p/old-901",tl:19,meta:false,h1:1,canon:false,iss:4,idx:false},
+ {u:"/blog/seo-guide",tl:63,meta:true,h1:1,canon:true,iss:1,idx:true},
+ {u:"/blog/seo-guide-2024",tl:63,meta:true,h1:1,canon:true,iss:3,idx:true}
+];
+var FEED=[
+ {ic:"check",tx:{fa:"۷۷ متا دیسکریپشن کوتاه شد — کم‌ریسک، خودکار",en:"77 meta descriptions trimmed — low risk, automatic"},tm:{fa:"۱۲ د",en:"12m"}},
+ {ic:"shield",tx:{fa:"۹ ریدایرکت برای تأیید انسان ارسال شد",en:"9 redirects sent for human approval"},tm:{fa:"۴۰ د",en:"40m"}},
+ {ic:"play",tx:{fa:"اسکن run_9f31 آغاز شد — ۸۱۲ از ۱٬۸۴۲ صفحه",en:"Scan run_9f31 started — 812 of 1,842 pages"},tm:{fa:"۱ س",en:"1h"}},
+ {ic:"undo",tx:{fa:"بازگردانی یک اصلاح عنوان به درخواست کاربر",en:"One title fix rolled back at user request"},tm:{fa:"۵ س",en:"5h"}},
+ {ic:"x",tx:{fa:"اسکن run_9d40 ناموفق — DNS پاسخ نداد، ۳ تلاش",en:"Scan run_9d40 failed — DNS timeout after 3 retries"},tm:{fa:"۱ ر",en:"1d"}}
+];
+var AUDITLOG=[
+ {who:"agent",act:{fa:"اعمال اصلاح کم‌ریسک: alt تصاویر (۱۴۳ صفحه)",en:"Applied low-risk fix: image alt (143 pages)"},tm:"2026-09-19 14:02"},
+ {who:"sara@example.ir",act:{fa:"تأیید ریدایرکت ۹ نشانی",en:"Approved redirect for 9 URLs"},tm:"2026-09-19 11:20"},
+ {who:"sara@example.ir",act:{fa:"تغییر نقش reza@example.ir به editor",en:"Changed reza@example.ir role to editor"},tm:"2026-09-18 17:44"},
+ {who:"agent",act:{fa:"رد خودکار: تغییر URL بدون تأیید مسدود شد",en:"Auto-rejected: URL change blocked without approval"},tm:"2026-09-18 09:05"}
+];
+
+/* ============================ charts ============================ */
+function lineChart(data,id){
+  var W=680,H=210,pl=34,pr=14,pt=14,pb=24;
+  var min=Math.min.apply(null,data)-4, max=Math.max.apply(null,data)+4;
+  var x=function(i){return pl+i*(W-pl-pr)/(data.length-1)};
+  var y=function(v){return pt+(max-v)/(max-min)*(H-pt-pb)};
+  var pts=data.map(function(v,i){return x(i)+","+y(v)});
+  var gl="",ticks=[60,65,70,75];
+  ticks.forEach(function(v){
+    gl+='<line class="grid-l" x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y(v).toFixed(1)+'" y2="'+y(v).toFixed(1)+'"/>'+
+        '<text x="'+(pl-8)+'" y="'+(y(v)+3.5).toFixed(1)+'" text-anchor="end">'+n(v)+'</text>';
+  });
+  var last=data.length-1;
+  var xl=[[0,{fa:"۳۰ روز پیش",en:"30d ago"}],[Math.floor(last/2),{fa:"۱۵ روز",en:"15d"}],[last,{fa:"امروز",en:"today"}]];
+  var xt="";
+  xl.forEach(function(p,k){
+    xt+='<text x="'+x(p[0])+'" y="'+(H-6)+'" text-anchor="'+(k===0?"start":k===2?"end":"middle")+'">'+esc(bi(p[1]))+'</text>';
+  });
+  return '<svg class="chart" id="'+id+'" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(t("score_trend"))+'">'+
+    '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">'+
+    '<stop offset="0" stop-color="#2BE08A" stop-opacity=".28"/><stop offset="1" stop-color="#2BE08A" stop-opacity="0"/>'+
+    '</linearGradient></defs>'+gl+xt+
+    '<polygon fill="url(#ag)" points="'+pl+','+(H-pb)+' '+pts.join(" ")+' '+(W-pr)+','+(H-pb)+'"/>'+
+    '<polyline fill="none" stroke="#2BE08A" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="'+pts.join(" ")+'"/>'+
+    '<line id="cross" x1="0" x2="0" y1="'+pt+'" y2="'+(H-pb)+'" stroke="#314138" stroke-width="1" opacity="0"/>'+
+    '<circle id="dot" r="4" fill="#2BE08A" stroke="#080B09" stroke-width="2" opacity="0"/>'+
+    '<circle cx="'+x(last)+'" cy="'+y(data[last])+'" r="4.5" fill="#63F2AD" stroke="#080B09" stroke-width="2"/>'+
+    '<rect id="hit" x="'+pl+'" y="'+pt+'" width="'+(W-pl-pr)+'" height="'+(H-pt-pb)+'" fill="transparent"/></svg>';
+}
+function wireLine(data){
+  var s=document.getElementById("lineC"); if(!s)return;
+  var hit=s.querySelector("#hit"),cr=s.querySelector("#cross"),dt=s.querySelector("#dot"),tip=document.getElementById("tip");
+  var W=680,pl=34,pr=14,pt=14,pb=24,H=210;
+  var min=Math.min.apply(null,data)-4,max=Math.max.apply(null,data)+4;
+  function move(e){
+    var r=s.getBoundingClientRect(), rel=(e.clientX-r.left)/r.width*W;
+    var i=Math.round((rel-pl)/((W-pl-pr)/(data.length-1)));
+    i=Math.max(0,Math.min(data.length-1,i));
+    var px=pl+i*(W-pl-pr)/(data.length-1), py=pt+(max-data[i])/(max-min)*(H-pt-pb);
+    cr.setAttribute("x1",px);cr.setAttribute("x2",px);cr.setAttribute("opacity","1");
+    dt.setAttribute("cx",px);dt.setAttribute("cy",py);dt.setAttribute("opacity","1");
+    var d=data.length-1-i;
+    tip.innerHTML='<b>'+n(data[i])+'</b> · '+(d===0?esc(bi({fa:"امروز",en:"today"})):esc(n(d)+" "+bi({fa:"روز پیش",en:"d ago"})));
+    tip.style.opacity="1";
+    tip.style.left=Math.min(window.innerWidth-150,r.left+px/W*r.width+12)+"px";
+    tip.style.top=(r.top+py/H*r.height-10)+"px";
+  }
+  function out(){cr.setAttribute("opacity","0");dt.setAttribute("opacity","0");document.getElementById("tip").style.opacity="0"}
+  hit.addEventListener("mousemove",move); hit.addEventListener("mouseleave",out);
+  s.addEventListener("touchmove",function(e){if(e.touches[0])move(e.touches[0])},{passive:true});
+}
+function sevBars(){
+  var max=Math.max.apply(null,SEVER.map(function(s){return s.v}));
+  var h='<div style="display:flex;flex-direction:column;gap:12px">';
+  SEVER.forEach(function(s){
+    h+='<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'+
+       '<span class="sev '+s.k+'"><i></i><span>'+esc(bi(s))+'</span></span>'+
+       '<span class="spacer"></span><span class="num" style="font-family:var(--f-en);font-size:13px">'+n(s.v)+'</span></div>'+
+       '<div class="bar"><i style="width:'+(s.v/max*100)+'%;background:var(--'+(s.k==="crit"?"crit":s.k==="serious"?"serious":s.k==="warn"?"warn":"info")+')"></i></div></div>';
+  });
+  return h+'</div>';
+}
+function gauge(v){
+  var R=54,C=Math.PI*R,frac=v/100;
+  return '<svg viewBox="0 0 140 84" style="width:150px;height:auto;flex:none" role="img" aria-label="'+esc(t("t_score"))+' '+v+'/100">'+
+   '<path d="M16 70a54 54 0 0 1 108 0" fill="none" stroke="#1E2823" stroke-width="11" stroke-linecap="round"/>'+
+   '<path d="M16 70a54 54 0 0 1 108 0" fill="none" stroke="#2BE08A" stroke-width="11" stroke-linecap="round" stroke-dasharray="'+(C*frac).toFixed(1)+' '+C.toFixed(1)+'"/>'+
+   '<text x="70" y="62" text-anchor="middle" style="fill:var(--ink);font-size:26px;font-weight:600">'+n(v)+'</text>'+
+   '<text x="70" y="78" text-anchor="middle">'+n(0)+' – '+n(100)+'</text></svg>';
+}
+
+/* ============================ fragments ============================ */
+function pillFor(st){
+  var m={running:["info","play"],queued:["mute","clock"],done:["ok","check"],failed:["crit","x"],
+         applied:["ok","check"],blocked:["warn","lock"],open:["serious","alert"],fixed:["ok","check"],ignored:["mute","eye"],
+         connected:["ok","check"],not:["mute","x"],ready:["info","info"]};
+  var k=m[st]||["mute","info"], lab={running:"running",queued:"queued",done:"done",failed:"failed",applied:"applied",
+   blocked:"blocked",open:"open",fixed:"fixed",ignored:"ignored",connected:"connected",not:"not_connected",ready:"ready"}[st]||st;
+  return '<span class="pill '+k[0]+'">'+svg(k[1])+t(lab)+'</span>';
+}
+function riskPill(r){
+  if(r==="low")return '<span class="pill ok">'+svg("check")+t("low_risk")+'</span>';
+  if(r==="sensitive")return '<span class="pill warn">'+svg("alert")+t("sensitive")+'</span>';
+  return '<span class="pill crit">'+svg("lock")+t("blocked")+'</span>';
+}
+function demoNote(){return '<div class="note">'+svg("info")+'<div>'+t("demo")+'</div></div>'}
+function card(title,sub,body,right){
+  return '<section class="card"><header><h3>'+title+'</h3>'+(sub?'<span class="sub">'+sub+'</span>':'')+
+   '<span class="spacer"></span>'+(right||'')+'</header><div class="body">'+body+'</div></section>';
+}
+function tbl(head,rows){
+  return '<div class="tw"><table><thead><tr>'+head.map(function(h){return '<th'+(h[1]?' style="text-align:end"':'')+'>'+h[0]+'</th>'}).join("")+
+   '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+/* ============================ screens ============================ */
+var V={};
+
+V.dashboard=function(){
+  var tiles=[
+   ["t_score","76",'<span class="delta up">▲ '+n(2)+'</span> '+t("vs_last")],
+   ["t_pages","1,612",t("of_pages")],
+   ["t_open","128",'<span class="delta down">▲ '+n(9)+'</span> '+t("since_fix")],
+   ["t_pending","6",t("need_human")]
+  ].map(function(x,i){
+    return '<div class="card tile"><div class="k">'+t(x[0])+'</div><div class="v">'+(i===1?n(1612):n(x[1]))+
+      (i===0?'<span style="font-size:15px;color:var(--ink-3);font-weight:400"> /'+n(100)+'</span>':'')+
+      '</div><div class="foot">'+x[2]+'</div></div>';
+  }).join("");
+
+  var runs=RUNS.map(function(r){
+    return '<tr><td class="mono">'+r.id+'</td><td>'+r.proj+'</td><td>'+pillFor(r.st)+'</td>'+
+      '<td class="tnum">'+n(r.pages)+'</td><td class="tnum">'+(S.lang==="fa"?r.dur:r.durEn)+'</td>'+
+      '<td style="color:var(--ink-3)">'+bi(r.when)+'</td></tr>';
+  }).join("");
+
+  var feed='<ul class="feed" style="margin:0;padding:0">'+FEED.map(function(f){
+    return '<li><span class="ic">'+svg(f.ic)+'</span><span>'+bi(f.tx)+'</span><time>'+bi(f.tm)+'</time></li>';
+  }).join("")+'</ul>';
+
+  var health='<dl class="kv"><dt>'+t("queue_depth")+'</dt><dd class="num">'+n(3)+' '+bi({fa:"جاب",en:"jobs"})+'</dd>'+
+   '<dt>'+t("worker")+'</dt><dd>'+pillFor("done")+'</dd><dt>'+t("crawler")+'</dt><dd>'+pillFor("running")+'</dd>'+
+   '<dt>'+t("db")+'</dt><dd>'+pillFor("done")+'</dd></dl>';
+
+  return demoNote()+
+   '<div class="grid g4">'+tiles+'</div>'+
+   '<div class="split">'+
+     card(t("score_trend"),bi({fa:"یک سری، مقیاس ۰ تا ۱۰۰",en:"single series, 0–100 scale"}),
+       '<div class="gauge-wrap">'+gauge(76)+'<div style="flex:1 1 320px;min-width:0">'+lineChart(TREND,"lineC")+'</div></div>')+
+     card(t("severity_dist"),n(128)+" "+bi({fa:"ایشو باز",en:"open issues"}),sevBars())+
+   '</div>'+
+   '<div class="split">'+
+     card(t("recent_runs"),"",tbl([["ID"],[t("proj_site")],[t("status")],[t("pages"),1],[t("duration"),1],[t("started")]],runs),
+       '<button class="btn ghost sm" data-go="audit">'+t("view")+'</button>')+
+     card(t("agent_activity"),"",feed)+
+   '</div>'+
+   '<div class="g2 grid">'+card(t("health"),"",health)+
+     card(bi({fa:"اقدام بعدی",en:"Next best action"}),"",
+      '<div class="note acc">'+svg("shield")+'<div>'+bi({fa:"۶ درخواست حساس در صف تأیید است. تا زمانی که تأیید نشوند هیچ ریدایرکت یا تغییر URL اجرا نمی‌شود.",en:"6 sensitive requests are queued. No redirect or URL change runs until they are approved."})+'</div></div>'+
+      '<div style="margin-top:12px"><button class="btn primary" data-go="approvals">'+svg("shield")+t("approvals")+'</button></div>')+
+   '</div>';
+};
+
+V.onboarding=function(){
+  var steps=[
+   {t:{fa:"افزودن سایت",en:"Add site"},s:"done"},
+   {t:{fa:"اتصال وردپرس",en:"Connect WordPress"},s:"now"},
+   {t:{fa:"زبان و دامنه",en:"Language & domain"},s:""},
+   {t:{fa:"اولین اسکن",en:"First scan"},s:""}
+  ];
+  var sh='<div class="steps">'+steps.map(function(s,i){
+    return '<div class="step '+s.s+'"><span class="n">'+(s.s==="done"?"✓":n(i+1))+'</span><span class="t">'+bi(s.t)+'</span></div>';
+  }).join("")+'</div>';
+
+  var form='<div class="grid g2" style="gap:14px">'+
+   '<label class="field"><span>'+bi({fa:"نشانی سایت وردپرسی",en:"WordPress site URL"})+'</span>'+
+   '<input id="ob-url" value="https://shop.example.ir" dir="ltr"></label>'+
+   '<label class="field"><span>'+bi({fa:"نام کاربری",en:"Username"})+'</span><input id="ob-user" value="seo-table-bot" dir="ltr"></label>'+
+   '<label class="field"><span>'+bi({fa:"Application Password",en:"Application Password"})+'</span>'+
+   '<input id="ob-pass" type="password" value="xxxx xxxx xxxx xxxx xxxx xxxx" dir="ltr"></label>'+
+   '<label class="field"><span>'+bi({fa:"سقف صفحات در هر اسکن",en:"Page cap per scan"})+'</span>'+
+   '<select id="ob-cap"><option>'+n(500)+'</option><option selected>'+n(2000)+'</option><option>'+n(10000)+'</option></select></label>'+
+   '</div>'+
+   '<div class="note lock" style="margin-top:14px">'+svg("lock")+'<div>'+
+   bi({fa:"این اعتبارنامه رمزنگاری‌شده ذخیره می‌شود و فقط برای نوشتن اصلاح‌های تأییدشده استفاده می‌شود. هیچ حذف یا تغییر URL بدون تأیید انجام نمی‌شود.",
+       en:"Credentials are stored encrypted and used only to write approved fixes. No deletion or URL change happens without approval."})+
+   '</div></div>'+
+   '<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">'+
+   '<button class="btn primary">'+svg("link")+bi({fa:"تست اتصال و ادامه",en:"Test connection & continue"})+'</button>'+
+   '<button class="btn ghost">'+bi({fa:"فعلاً رد کن",en:"Skip for now"})+'</button></div>';
+
+  return card(bi({fa:"راه‌اندازی پروژه",en:"Project setup"}),bi({fa:"مرحله ۲ از ۴",en:"Step 2 of 4"}),sh)+
+   card(bi({fa:"اتصال وردپرس",en:"Connect WordPress"}),bi({fa:"REST API + Application Password",en:"REST API + Application Password"}),form)+
+   card(bi({fa:"در این مرحله چه اتفاقی می‌افتد",en:"What happens next"}),"",
+    '<ul class="plain"><li>'+bi({fa:"خزنده robots.txt را می‌خواند و به آن احترام می‌گذارد.",en:"The crawler reads and respects robots.txt."})+'</li>'+
+    '<li>'+bi({fa:"هر صفحه یک PageSnapshot تغییرناپذیر می‌سازد.",en:"Each page produces an immutable PageSnapshot."})+'</li>'+
+    '<li>'+bi({fa:"ایشوها به‌صورت occurrence ثبت می‌شوند؛ رکورد قبلی هرگز بازنویسی نمی‌شود.",en:"Issues are recorded as occurrences; prior records are never rewritten."})+'</li>'+
+    '<li>'+bi({fa:"برای هر پروژه همزمان فقط یک اسکن فعال است.",en:"Only one scan is active per project at a time."})+'</li></ul>');
+};
+
+V.projects=function(){
+  var rows=PROJECTS.map(function(p){
+    return '<tr><td><b style="font-weight:500">'+p.site+'</b></td>'+
+     '<td><span class="pill mute">'+(p.lang==="fa"?"فارسی · RTL":"EN · LTR")+'</span></td>'+
+     '<td class="tnum">'+n(p.pages)+'</td>'+
+     '<td class="tnum">'+(p.score?n(p.score):"—")+'</td>'+
+     '<td class="tnum">'+(p.issues?n(p.issues):"—")+'</td>'+
+     '<td>'+pillFor(p.st)+'</td><td style="color:var(--ink-3)">'+bi(p.when)+'</td>'+
+     '<td style="text-align:end"><button class="btn ghost sm" data-go="audit">'+t("details")+'</button></td></tr>';
+  }).join("");
+  return demoNote()+card(t("projects"),n(3)+" "+bi({fa:"پروژه فعال",en:"active projects"}),
+    tbl([[t("proj_site")],[t("proj_lang")],[t("proj_pages"),1],[t("score"),1],[t("proj_issues"),1],[t("status")],[t("last_scan")],[""]],rows),
+    '<div class="search">'+svg("search")+'<input placeholder="'+t("search")+'" id="p-search"></div>'+
+    '<button class="btn primary" data-go="onboarding">'+svg("plus")+t("new_project")+'</button>');
+};
+
+V.audit=function(){
+  var tabs=["tab_over","tab_pages","tab_rules","tab_log"];
+  var seg='<div class="seg" role="group">'+tabs.map(function(k){
+    return '<button data-tab="'+k+'" aria-pressed="'+(S.tab===k)+'">'+t(k)+'</button>'}).join("")+'</div>';
+
+  var head='<div class="card"><div class="body" style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'+
+   '<div><div class="k" style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)">'+t("run_header")+'</div>'+
+   '<div style="font-family:var(--f-mono);font-size:16px;margin-top:4px">run_9f31</div></div>'+
+   '<div style="width:1px;height:38px;background:var(--border)"></div>'+
+   '<dl class="kv" style="margin:0;grid-template-columns:auto auto auto auto auto auto;align-items:center">'+
+   '<dt>'+t("status")+'</dt><dd>'+pillFor("running")+'</dd>'+
+   '<dt>'+t("crawled")+'</dt><dd class="num">'+n(812)+' / '+n(1842)+'</dd>'+
+   '<dt>'+t("duration")+'</dt><dd class="num">'+(S.lang==="fa"?"۰۴:۱۲":"04:12")+'</dd></dl>'+
+   '<span class="spacer"></span><button class="btn ghost">'+svg("x")+bi({fa:"توقف اسکن",en:"Stop scan"})+'</button>'+
+   '</div><div class="body" style="padding-top:0"><div class="bar"><i style="width:44%"></i></div></div></div>';
+
+  var body;
+  if(S.tab==="tab_pages"||S.tab==="tab_over"){
+    var rows=PAGESROW.map(function(p){
+      return '<tr><td class="path">'+p.u+'</td><td class="tnum">'+n(p.tl)+'</td>'+
+       '<td>'+(p.meta?'<span class="pill ok">'+svg("check")+'</span>':'<span class="pill crit">'+svg("x")+'</span>')+'</td>'+
+       '<td class="tnum">'+n(p.h1)+'</td>'+
+       '<td>'+(p.canon?'<span class="pill ok">'+svg("check")+'</span>':'<span class="pill crit">'+svg("x")+'</span>')+'</td>'+
+       '<td>'+(p.idx?'<span class="pill ok">'+svg("check")+t("indexable")+'</span>':'<span class="pill crit">'+svg("lock")+'noindex</span>')+'</td>'+
+       '<td class="tnum">'+n(p.iss)+'</td></tr>';
+    }).join("");
+    body=card(t("tab_pages"),bi({fa:"۸۱۲ صفحه تا این لحظه",en:"812 pages so far"}),
+      tbl([[t("page_url")],[t("title_len"),1],[t("meta")],[t("h1"),1],[t("canon")],[t("indexable")],[t("issues_n"),1]],rows));
+  } else if(S.tab==="tab_rules"){
+    var rr=[["title","عنوان","Title",31],["meta","متا","Meta",77],["h1","H1","H1",22],
+            ["canonical","Canonical","Canonical",7],["robots","robots","robots",3],["sitemap","Sitemap","Sitemap",64],
+            ["alt","alt تصاویر","Image alt",143],["links","لینک داخلی","Internal links",18],
+            ["duplicate","محتوای تکراری","Duplicate content",12],["index","ایندکس‌پذیری","Indexability",4]];
+    body=card(t("tab_rules"),n(10)+" "+bi({fa:"گروه قاعده",en:"rule groups"}),
+      tbl([[t("rule")],[t("category")],[t("pages"),1],[t("status")]],
+        rr.map(function(r){return '<tr><td class="mono">rule.'+r[0]+'</td><td>'+(S.lang==="fa"?r[1]:r[2])+
+         '</td><td class="tnum">'+n(r[3])+'</td><td>'+pillFor(r[3]>50?"open":"done")+'</td></tr>'}).join("")));
+  } else {
+    var logs=[
+     "14:02:11  worker  job run_9f31 claimed (attempt 1/3)",
+     "14:02:11  crawler robots.txt fetched — 4 disallow rules honored",
+     "14:03:40  crawler 400 pages · 12 req/s · 0 timeouts",
+     "14:05:02  rules   title/meta/h1 evaluated for 400 snapshots",
+     "14:06:19  crawler redirect loop guard tripped at /p/old-901 → skipped",
+     "14:08:55  rules   14 new IssueOccurrence rows appended",
+     "14:09:02  lock    project advisory lock held — concurrent scan refused"
+    ].map(function(l){return '<div style="padding:5px 0;border-bottom:1px solid var(--border)">'+esc(l)+'</div>'}).join("");
+    body=card(t("tab_log"),"run_9f31",'<div class="mono" dir="ltr" style="color:var(--ink-2)">'+logs+'</div>');
+  }
+  return demoNote()+head+'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+seg+
+    '<span class="spacer"></span><button class="btn ghost">'+svg("dl")+t("export")+'</button></div>'+body;
+};
+
+V.issues=function(){
+  var rows=ISSUES.map(function(i){
+    return '<tr><td><span class="sev '+i.sev+'"><i></i><span>'+bi({fa:{crit:"بحرانی",serious:"جدی",warn:"هشدار",info:"اطلاعی"}[i.sev],
+      en:{crit:"Critical",serious:"Serious",warn:"Warning",info:"Info"}[i.sev]})+'</span></span></td>'+
+     '<td>'+bi(i.rule)+'</td><td style="color:var(--ink-2)">'+bi(i.cat)+'</td>'+
+     '<td class="tnum">'+n(i.p)+'</td><td class="tnum">'+n(i.o)+'</td>'+
+     '<td style="color:var(--ink-3)">'+bi(i.seen)+'</td><td>'+pillFor(i.st)+'</td>'+
+     '<td style="text-align:end"><button class="btn ghost sm" data-go="fixes">'+t("review")+'</button></td></tr>';
+  }).join("");
+
+  var detail=card(t("issue_detail"),"rule.canonical / broken-target",
+    '<dl class="kv" style="margin-bottom:14px"><dt>'+t("severity")+'</dt><dd><span class="sev crit"><i></i><span>'+
+    bi({fa:"بحرانی",en:"Critical"})+'</span></span></dd>'+
+    '<dt>'+t("affected")+'</dt><dd class="num">'+n(7)+'</dd>'+
+    '<dt>'+t("occurrences")+'</dt><dd class="num">'+n(19)+'</dd></dl>'+
+    '<div style="font-size:12.5px;color:var(--ink-3);margin-bottom:6px">'+t("suggested")+'</div>'+
+    '<div class="diff" dir="ltr"><div class="del"><em>−</em><span>&lt;link rel="canonical" href="/p/old-901"&gt;</span></div>'+
+    '<div class="add"><em>+</em><span>&lt;link rel="canonical" href="/p/901"&gt;</span></div></div>'+
+    '<div style="font-size:12.5px;color:var(--ink-3);margin:14px 0 6px">'+t("history")+'</div>'+
+    '<ul class="feed" style="margin:0;padding:0">'+
+    ['{"fa":"اولین مشاهده در run_9c10","en":"first seen in run_9c10"}',
+     '{"fa":"تکرار در run_9d77 — تعداد صفحات ۵ → ۷","en":"recurred in run_9d77 — pages 5 → 7"}',
+     '{"fa":"اصلاح پیشنهاد شد، در انتظار تأیید","en":"fix proposed, awaiting approval"}']
+    .map(function(s,k){var o=JSON.parse(s);
+      return '<li><span class="ic">'+svg("clock")+'</span><span>'+bi(o)+'</span><time>'+bi({fa:["۴ ر","۲ ر","۱ ر"][k],en:["4d","2d","1d"][k]})+'</time></li>'}).join("")+'</ul>');
+
+  return demoNote()+
+   '<div class="split">'+
+    card(t("issues"),n(128)+" "+t("open"),
+      tbl([[t("severity")],[t("rule")],[t("category")],[t("pages"),1],[t("occurrences"),1],[t("first_seen")],[t("status")],[""]],rows),
+      '<div class="search">'+svg("search")+'<input placeholder="'+t("search")+'" id="i-search"></div>'+
+      '<select id="i-sev" style="width:auto"><option>'+t("all")+'</option><option>'+bi({fa:"بحرانی",en:"Critical"})+
+      '</option><option>'+bi({fa:"جدی",en:"Serious"})+'</option></select>')+
+    detail+'</div>';
+};
+
+V.fixes=function(){
+  var cards=FIXES.map(function(f){
+    return '<section class="card"><header><h3>'+bi(f.rule)+'</h3>'+riskPill(f.risk)+
+     '<span class="spacer"></span>'+pillFor(f.st)+'</header><div class="body">'+
+     '<div style="font-size:12.5px;color:var(--ink-3);margin-bottom:8px">'+t("target")+': '+
+     '<span class="num" style="color:var(--ink)">'+n(f.tgt)+'</span> '+t("pages")+'</div>'+
+     '<div class="diff" dir="ltr"><div class="del"><em>−</em><span>'+esc(bi(f.b))+'</span></div>'+
+     '<div class="add"><em>+</em><span>'+esc(bi(f.a))+'</span></div></div>'+
+     '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'+
+     (f.st==="applied"
+       ? '<button class="btn ghost">'+svg("undo")+bi({fa:"بازگردانی",en:"Roll back"})+'</button>'
+       : f.risk==="low"
+         ? '<button class="btn primary">'+svg("play")+t("apply")+'</button><button class="btn ghost">'+svg("eye")+bi({fa:"اجرای آزمایشی",en:"Dry run"})+'</button>'
+         : '<button class="btn primary" data-go="approvals">'+svg("shield")+bi({fa:"ارسال برای تأیید",en:"Send for approval"})+'</button>')+
+     '<button class="btn ghost">'+svg("eye")+t("preview")+'</button></div></div></section>';
+  }).join("");
+  return '<div class="note lock">'+svg("shield")+'<div>'+t("fix_policy")+'</div></div>'+
+   demoNote()+'<div class="grid g2">'+cards+'</div>';
+};
+
+V.approvals=function(){
+  var cards=APPROVALS.map(function(a){
+    return '<section class="card"><header><span class="pill '+(a.sev==="crit"?"crit":a.sev==="serious"?"serious":"warn")+'">'+
+      svg("lock")+t(a.type)+'</span><span class="spacer"></span>'+
+      '<span class="pill mute">'+svg("clock")+t("waiting")+' '+bi(a.wait)+'</span></header>'+
+     '<div class="body"><h3 style="font-size:14.5px;margin-bottom:6px">'+bi(a.title)+'</h3>'+
+     '<p style="color:var(--ink-2);font-size:12.5px;margin-bottom:12px">'+bi(a.why)+'</p>'+
+     '<div class="diff" dir="ltr"><div class="del"><em>−</em><span>'+esc(a.b)+'</span></div>'+
+     '<div class="add"><em>+</em><span>'+esc(a.a)+'</span></div></div>'+
+     '<div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap">'+
+     '<span style="font-size:12px;color:var(--ink-3)">'+t("requested_by")+': '+t("agent")+'</span>'+
+     '<span class="spacer"></span>'+
+     '<button class="btn ghost sm">'+svg("eye")+t("details")+'</button>'+
+     '<button class="btn danger sm">'+svg("x")+t("reject")+'</button>'+
+     '<button class="btn primary sm">'+svg("check")+t("approve")+'</button></div></div></section>';
+  }).join("");
+  return '<div class="note lock">'+svg("lock")+'<div>'+t("appr_lock")+'</div></div>'+
+   demoNote()+'<div class="grid g2">'+cards+'</div>';
+};
+
+V.content=function(){
+  var rows=OPPS.map(function(o){
+    return '<tr><td><b style="font-weight:500">'+bi(o.q)+'</b></td>'+
+     '<td class="tnum">'+n(o.imp)+'</td><td class="tnum">'+n(o.clk)+'</td>'+
+     '<td class="tnum">'+o.ctr+'</td><td class="tnum">'+n(o.pos)+'</td>'+
+     '<td><span class="sev '+o.gap+'"><i></i><span>'+bi({fa:{crit:"بالا",serious:"متوسط",warn:"کم"}[o.gap],
+       en:{crit:"High",serious:"Medium",warn:"Low"}[o.gap]})+'</span></span></td>'+
+     '<td style="color:var(--ink-2)">'+bi(o.act)+'</td>'+
+     '<td style="text-align:end"><button class="btn ghost sm">'+svg("plus")+bi({fa:"ساخت تسک",en:"Create task"})+'</button></td></tr>';
+  }).join("");
+  return '<div class="note">'+svg("info")+'<div>'+bi({fa:"این صفحه با داده‌ی Search Console کار می‌کند. تا وقتی اتصال برقرار نشود، خالی می‌ماند — اعداد زیر نمونه‌اند.",
+    en:"This page runs on Search Console data. Until that connector is live it stays empty — the figures below are examples."})+'</div></div>'+
+   card(t("content"),n(17)+" "+bi({fa:"فرصت شناسایی‌شده",en:"opportunities found"}),
+    tbl([[t("query")],[t("impressions"),1],[t("clicks"),1],[t("ctr"),1],[t("position"),1],[t("gap")],[t("action_sugg")],[""]],rows),
+    '<button class="btn ghost" data-go="connectors">'+svg("plug")+bi({fa:"اتصال Search Console",en:"Connect Search Console"})+'</button>');
+};
+
+V.connectors=function(){
+  var cards=CONNS.map(function(c){
+    return '<section class="card"><div class="body">'+
+     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'+
+     '<span style="width:34px;height:34px;border-radius:9px;flex:none;display:grid;place-items:center;background:var(--surface-3);color:var(--ink-2);font-family:var(--f-en);font-weight:600;font-size:13px">'+
+      c.name.slice(0,2).toUpperCase()+'</span>'+
+     '<div style="min-width:0"><div style="font-weight:500">'+c.name+'</div>'+
+     '<div style="font-size:11.5px;color:var(--ink-3)">'+(c.sync?t("last_sync")+" · "+bi(c.sync):"—")+'</div></div>'+
+     '<span class="spacer"></span>'+pillFor(c.st)+'</div>'+
+     '<div style="font-size:12.5px;color:var(--ink-2);margin-bottom:6px">'+t("scopes")+'</div>'+
+     '<div style="font-size:12.5px;color:var(--ink-3);margin-bottom:12px">'+bi(c.scopes)+'</div>'+
+     '<div class="note" style="font-size:12px">'+svg("info")+'<div>'+bi(c.note)+'</div></div>'+
+     '<div style="margin-top:14px">'+(c.st==="connected"
+       ? '<button class="btn ghost">'+svg("gear")+t("manage")+'</button>'
+       : '<button class="btn primary">'+svg("link")+t("connect")+'</button>')+'</div></div></section>';
+  }).join("");
+  return '<div class="note lock">'+svg("info")+'<div>'+t("conn_note")+'</div></div>'+
+   '<div class="grid g3">'+cards+'</div>';
+};
+
+V.reports=function(){
+  var rows=[
+   {nm:{fa:"خلاصه ماهانه سئو",en:"Monthly SEO summary"},rg:{fa:"ماهانه",en:"Monthly"},fmt:"PDF",sch:{fa:"اول هر ماه",en:"1st of month"},to:"sara@example.ir"},
+   {nm:{fa:"ایشوهای بحرانی",en:"Critical issues"},rg:{fa:"هفتگی",en:"Weekly"},fmt:"CSV",sch:{fa:"شنبه‌ها ۰۹:۰۰",en:"Mondays 09:00"},to:"seo-team@example.ir"},
+   {nm:{fa:"اصلاح‌های اعمال‌شده",en:"Applied fixes"},rg:{fa:"هفتگی",en:"Weekly"},fmt:"PDF",sch:{fa:"—",en:"—"},to:"—"}
+  ].map(function(r){
+    return '<tr><td><b style="font-weight:500">'+bi(r.nm)+'</b></td><td>'+bi(r.rg)+'</td>'+
+     '<td><span class="pill mute">'+r.fmt+'</span></td><td style="color:var(--ink-2)">'+bi(r.sch)+'</td>'+
+     '<td class="path">'+r.to+'</td><td style="text-align:end">'+
+     '<button class="btn ghost sm">'+svg("dl")+bi({fa:"دانلود",en:"Download"})+'</button></td></tr>';
+  }).join("");
+  return demoNote()+card(t("reports"),n(3)+" "+bi({fa:"گزارش",en:"reports"}),
+    tbl([[bi({fa:"نام",en:"Name"})],[t("range")],[t("format")],[t("schedule")],[t("recipients")],[""]],rows),
+    '<button class="btn primary">'+svg("plus")+t("new_report")+'</button>');
+};
+
+V.settings=function(){
+  var tabs=["s_general","s_team","s_safety","s_keys","s_log"];
+  var seg='<div class="seg" role="group">'+tabs.map(function(k){
+    return '<button data-stab="'+k+'" aria-pressed="'+(S.sTab===k)+'">'+t(k)+'</button>'}).join("")+'</div>';
+  var body;
+  if(S.sTab==="s_general"){
+    body=card(t("s_general"),"",
+     '<div class="grid g2" style="gap:14px">'+
+     '<label class="field"><span>'+bi({fa:"نام سازمان",en:"Organization name"})+'</span><input value="Example Retail"></label>'+
+     '<label class="field"><span>'+bi({fa:"زبان پیش‌فرض",en:"Default language"})+'</span><select><option selected>فارسی (RTL)</option><option>English (LTR)</option></select></label>'+
+     '<label class="field"><span>'+bi({fa:"منطقه زمانی",en:"Timezone"})+'</span><select><option selected>Asia/Tehran</option><option>UTC</option></select></label>'+
+     '<label class="field"><span>'+bi({fa:"واحد گزارش",en:"Reporting unit"})+'</span><select><option selected>'+bi({fa:"شمسی",en:"Jalali"})+'</option><option>'+bi({fa:"میلادی",en:"Gregorian"})+'</option></select></label>'+
+     '</div>');
+  } else if(S.sTab==="s_team"){
+    var perms=["perm_read","perm_scan","perm_fix","perm_appr","perm_billing"];
+    var roles=[["owner",[1,1,1,1,1]],["admin",[1,1,1,1,0]],["editor",[1,1,1,0,0]],["viewer",[1,0,0,0,0]]];
+    body=card(t("s_team"),bi({fa:"RBAC — در سطح سرور اعمال می‌شود",en:"RBAC — enforced server-side"}),
+      tbl([[t("role")]].concat(perms.map(function(p){return [t(p),1]})),
+        roles.map(function(r){
+          return '<tr><td><span class="pill '+(r[0]==="owner"?"acc":"mute")+'">'+r[0]+'</span></td>'+
+            r[1].map(function(v){return '<td style="text-align:end">'+(v
+              ?'<span class="pill ok">'+svg("check")+'</span>'
+              :'<span class="pill mute">'+svg("x")+'</span>')+'</td>'}).join("")+'</tr>';
+        }).join("")));
+  } else if(S.sTab==="s_safety"){
+    body=card(t("s_safety"),bi({fa:"این محدودیت‌ها سمت سرور اعمال می‌شوند",en:"Enforced server-side"}),
+     '<div class="note lock" style="margin-bottom:14px">'+svg("lock")+'<div>'+t("appr_lock")+'</div></div>'+
+     '<div class="grid g2" style="gap:14px">'+
+     '<label class="field"><span>'+bi({fa:"حداکثر تغییر در هر اجرا",en:"Max changes per run"})+'</span><input value="'+n(50)+'"></label>'+
+     '<label class="field"><span>'+bi({fa:"حداکثر اسکن همزمان برای هر پروژه",en:"Max concurrent scans per project"})+'</span><input value="'+n(1)+'"></label>'+
+     '<label class="field"><span>'+bi({fa:"نرخ درخواست خزنده",en:"Crawler request rate"})+'</span><input value="'+n(12)+' req/s"></label>'+
+     '<label class="field"><span>'+bi({fa:"نگهداری snapshot",en:"Snapshot retention"})+'</span><input value="'+n(90)+' '+bi({fa:"روز",en:"days"})+'"></label>'+
+     '</div>'+
+     '<ul class="plain" style="margin-top:14px"><li>'+bi({fa:"هر نوشتن ابتدا dry-run و diff دارد.",en:"Every write is dry-run with a diff first."})+'</li>'+
+     '<li>'+bi({fa:"قبل از نوشتن snapshot گرفته می‌شود و rollback یک‌کلیکی است.",en:"A snapshot is taken before writing; rollback is one click."})+'</li>'+
+     '<li>'+bi({fa:"ریدایرکت، تغییر URL و ادغام در لیست ممنوعِ بدون تأیید است.",en:"Redirects, URL changes and merges are on the never-without-approval list."})+'</li></ul>');
+  } else if(S.sTab==="s_keys"){
+    body=card(t("s_keys"),bi({fa:"کلیدها فقط یک‌بار نمایش داده می‌شوند",en:"Keys are shown once, at creation"}),
+      tbl([[bi({fa:"نام",en:"Name"})],[bi({fa:"کلید",en:"Key"})],[bi({fa:"ساخته‌شده",en:"Created"})],[""]],
+       [["ci-pipeline","st_live_••••••••4f21","2026-08-03"],["reporting","st_live_••••••••9ac7","2026-06-17"]]
+       .map(function(k){return '<tr><td>'+k[0]+'</td><td class="path">'+k[1]+'</td><td class="path">'+k[2]+
+        '</td><td style="text-align:end"><button class="btn danger sm">'+svg("x")+bi({fa:"لغو",en:"Revoke"})+'</button></td></tr>'}).join("")),
+      '<button class="btn primary">'+svg("plus")+bi({fa:"کلید جدید",en:"New key"})+'</button>');
+  } else {
+    body=card(t("s_log"),bi({fa:"تغییرناپذیر — فقط افزودن",en:"Immutable — append only"}),
+      tbl([[bi({fa:"زمان",en:"Time"})],[bi({fa:"عامل",en:"Actor"})],[bi({fa:"رویداد",en:"Event"})]],
+       AUDITLOG.map(function(l){return '<tr><td class="path">'+l.tm+'</td>'+
+         '<td>'+(l.who==="agent"?'<span class="pill acc">'+svg("wand")+t("agent")+'</span>':'<span class="path">'+l.who+'</span>')+
+         '</td><td>'+bi(l.act)+'</td></tr>'}).join("")),
+      '<button class="btn ghost">'+svg("dl")+t("export")+'</button>');
+  }
+  return '<div style="display:flex;gap:10px;flex-wrap:wrap">'+seg+'</div>'+body;
+};
+
+/* ============================ render ============================ */
+function render(){
+  var d=D[S.lang].dir;
+  document.documentElement.setAttribute("dir",d);
+  document.documentElement.setAttribute("lang",S.lang);
+  document.body.setAttribute("data-lang",S.lang);
+  document.getElementById("fa").setAttribute("aria-pressed",S.lang==="fa");
+  document.getElementById("en").setAttribute("aria-pressed",S.lang==="en");
+  document.getElementById("scanBtn").innerHTML=svg("play")+t("scan");
+  document.getElementById("crumb").innerHTML="SEO Table <span style='opacity:.4'>/</span> <b>"+t(S.screen)+"</b>";
+  renderNav();
+  document.getElementById("view").innerHTML=(V[S.screen]||V.dashboard)();
+  if(S.screen==="dashboard")wireLine(TREND);
+  window.scrollTo({top:0});
+}
+document.addEventListener("click",function(e){
+  var g=e.target.closest("[data-go]");
+  if(g){S.screen=g.getAttribute("data-go");if(S.screen==="audit")S.tab="tab_over";render();return}
+  var tb=e.target.closest("[data-tab]"); if(tb){S.tab=tb.getAttribute("data-tab");render();return}
+  var sb=e.target.closest("[data-stab]"); if(sb){S.sTab=sb.getAttribute("data-stab");render();return}
+  if(e.target.closest("#fa")){S.lang="fa";render();return}
+  if(e.target.closest("#en")){S.lang="en";render();return}
+  if(e.target.closest("#scanBtn")){S.screen="audit";S.tab="tab_log";render();return}
+});
+render();
+})();
+</script>

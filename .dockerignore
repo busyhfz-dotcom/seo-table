@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+.next
+**/.next
+.git
+.env
+.env.*
+!.env.example
+coverage
+*.log
+*.rdb
+# Not needed at runtime: test suites and fixtures (CI runs them from the
+# checkout), design references and CI configuration.
+tests
+design
+.github

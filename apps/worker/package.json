@@ -1,14 +1,29 @@
 {
-  "name": "@seo-table/worker",
-  "version": "0.3.0",
+  "name": "@seo/worker",
+  "version": "0.4.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts"
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "bullmq": "6.3.6"
+    "@seo/browser": "workspace:*",
+    "@seo/connectors": "workspace:*",
+    "@seo/core": "workspace:*",
+    "@seo/db": "workspace:*",
+    "@seo/pipeline": "workspace:*",
+    "@seo/seo-data": "workspace:*",
+    "@seo/social": "workspace:*",
+    "bullmq": "^5.34.6",
+    "ioredis": "^5.4.2",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
-    "tsx": "4.23.13"
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
   }
 }

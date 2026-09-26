@@ -1,24 +1,44 @@
 {
   "name": "seo-table",
-  "version": "0.3.0",
   "private": true,
-  "packageManager": "npm@11.19.1",
-  "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "lint": "turbo lint",
-    "test": "turbo test",
-    "db:generate": "npm run generate --workspace=@seo-table/database",
-    "db:validate": "npm exec --workspace=@seo-table/database -- prisma validate",
-    "db:migrate:deploy": "npm exec --workspace=@seo-table/database -- prisma migrate deploy",
-    "db:migrate:status": "npm exec --workspace=@seo-table/database -- prisma migrate status"
+  "version": "0.4.0",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "scripts": {
+    "build": "pnpm --filter @seo/db build && pnpm --filter @seo/core build && pnpm --filter @seo/connectors build && pnpm --filter @seo/pipeline build && pnpm --filter @seo/worker build && pnpm --filter @seo/web build",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit -p tests",
+    "lint": "pnpm -r lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "pnpm --filter @seo/db migrate",
+    "db:deploy": "pnpm --filter @seo/db deploy",
+    "db:seed": "tsx scripts/seed.ts",
+    "dev:web": "pnpm --filter @seo/web dev",
+    "dev:worker": "pnpm --filter @seo/worker dev",
+    "smoke": "tsx scripts/smoke.ts",
+    "fixture": "tsx scripts/fixture-server.ts"
+  },
   "devDependencies": {
-    "turbo": "2.10.13",
-    "typescript": "6.0.3"
+    "@seo/browser": "workspace:*",
+    "@seo/connectors": "workspace:*",
+    "@seo/core": "workspace:*",
+    "@seo/db": "workspace:*",
+    "@seo/pipeline": "workspace:*",
+    "@seo/seo-data": "workspace:*",
+    "@seo/social": "workspace:*",
+    "@types/node": "^22.10.2",
+    "miniflare": "4.20260730.0",
+    "playwright": "1.56.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.23",
+      "sharp": ">=0.35.4"
+    }
   }
 }
