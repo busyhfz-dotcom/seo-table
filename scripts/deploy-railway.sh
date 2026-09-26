@@ -31,14 +31,38 @@ PROJECT_NAME="${RAILWAY_PROJECT_NAME:-seo-table}"
 say() { printf '\n\033[1;32m▸ %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# Railway's own API (backboard.railway.com) occasionally drops a connection
+# mid-TLS-handshake; a few seconds later the identical call succeeds with no
+# change needed on our side. (This is what failed the first real deploy:
+# `railway domain` returned "tls handshake eof" and aborted the whole run.)
+# Every railway CLI call whose failure would abort the run goes through this
+# instead of calling `railway` directly.
+railway_retry() {
+  local tries=5 delay=3 i out rc
+  for i in $(seq 1 "$tries"); do
+    if out="$("$@" 2>&1)"; then
+      printf '%s' "$out"
+      return 0
+    fi
+    rc=$?
+    if [ "$i" = "$tries" ]; then
+      printf '%s' "$out" >&2
+      return "$rc"
+    fi
+    echo "  ($* — attempt $i/$tries failed, retrying in ${delay}s)" >&2
+    sleep "$delay"
+    delay=$(( delay * 2 ))
+  done
+}
+
 command -v railway >/dev/null || die "Railway CLI not found: npm i -g @railway/cli"
-railway whoami >/dev/null 2>&1 || die "Not logged in: run 'railway login' first"
+railway_retry railway whoami >/dev/null 2>&1 || die "Not logged in: run 'railway login' first"
 [ ${#OWNER_PASSWORD} -ge 10 ] || die "OWNER_PASSWORD must be at least 10 characters"
 
 # ---------------------------------------------------------------- project
 say "Project: $PROJECT_NAME"
-if ! railway status >/dev/null 2>&1; then
-  railway init --name "$PROJECT_NAME"
+if ! railway_retry railway status >/dev/null 2>&1; then
+  railway_retry railway init --name "$PROJECT_NAME"
 fi
 
 # ---------------------------------------------------------------- data services
@@ -69,31 +93,31 @@ else
   say "PostgreSQL"
   # Here-strings, not `printf | grep -q`: under pipefail grep's early exit can
   # SIGPIPE the printf and turn a match into a failure.
-  if grep -qi '"name": *"postgres"' <<<"$(railway status --json 2>/dev/null || true)"; then
+  if grep -qi '"name": *"postgres"' <<<"$(railway_retry railway status --json 2>/dev/null || true)"; then
     echo "  postgres already present"
   else
-    railway add --database postgres </dev/null || die "could not create Postgres"
+    railway_retry railway add --database postgres </dev/null || die "could not create Postgres"
   fi
   # shellcheck disable=SC2016  # a Railway reference, resolved by Railway, not the shell
   DATABASE_URL_VALUE='${{Postgres.DATABASE_URL}}'
 fi
 say "Redis"
-if grep -qi '"name": *"redis"' <<<"$(railway status --json 2>/dev/null || true)"; then
+if grep -qi '"name": *"redis"' <<<"$(railway_retry railway status --json 2>/dev/null || true)"; then
   echo "  redis already present"
 else
-  railway add --database redis </dev/null || die "could not create Redis"
+  railway_retry railway add --database redis </dev/null || die "could not create Redis"
 fi
 
 # ---------------------------------------------------------------- app services
 say "Services: web and worker"
 # --variables keeps `railway add` from asking for variables on an invisible
 # prompt; stdin from /dev/null makes any other prompt fail fast instead of hanging.
-existing_services="$(railway status --json 2>/dev/null || true)"
+existing_services="$(railway_retry railway status --json 2>/dev/null || true)"
 for svc in web worker; do
   if grep -q "\"name\": *\"$svc\"" <<<"$existing_services"; then
     echo "  $svc already present"
   else
-    railway add --service "$svc" --variables "SERVICE_ROLE=$svc" </dev/null \
+    railway_retry railway add --service "$svc" --variables "SERVICE_ROLE=$svc" </dev/null \
       || die "could not create the $svc service"
   fi
 done
@@ -104,7 +128,7 @@ done
 # the domain exists). Railway allows one generated domain per service; on a
 # re-run the command reports the existing one.
 say "Public domain"
-domain_out="$(railway domain --service web --port 3000 </dev/null 2>&1 || railway domain --service web </dev/null 2>&1 || true)"
+domain_out="$(railway_retry railway domain --service web --port 3000 </dev/null || railway_retry railway domain --service web </dev/null || true)"
 if [[ $domain_out =~ ([a-z0-9-]+(\.[a-z0-9-]+)*\.up\.railway\.app) ]]; then
   DOMAIN="${BASH_REMATCH[1]}"
 else
@@ -116,7 +140,7 @@ echo "  $BASE_URL"
 
 if [ -n "${CUSTOM_DOMAIN:-}" ]; then
   say "Custom domain $CUSTOM_DOMAIN"
-  railway domain "$CUSTOM_DOMAIN" --service web </dev/null || true
+  railway_retry railway domain "$CUSTOM_DOMAIN" --service web </dev/null || true
   echo "  Create the CNAME record Railway printed above at your DNS provider."
   echo "  TLS is issued automatically once the record resolves."
 fi
@@ -128,9 +152,9 @@ fi
 read_var() { # read_var <kv-output> <NAME>; strips a stray CR from Windows shells
   sed -n "s/^$2=//p" <<<"$1" | tr -d '\r' | head -n 1
 }
-web_vars="$(railway variables --service web --kv </dev/null)" \
+web_vars="$(railway_retry railway variables --service web --kv </dev/null)" \
   || die "Could not read the web service's variables; refusing to continue (secrets must not be regenerated)"
-worker_vars="$(railway variables --service worker --kv </dev/null)" \
+worker_vars="$(railway_retry railway variables --service worker --kv </dev/null)" \
   || die "Could not read the worker service's variables; refusing to continue (secrets must not be regenerated)"
 
 web_key="$(read_var "$web_vars" ENCRYPTION_KEY)"
@@ -161,7 +185,7 @@ fi
 
 set_vars() {
   local service="$1"; shift
-  railway variables --service "$service" --skip-deploys "$@" >/dev/null
+  railway_retry railway variables --service "$service" --skip-deploys "$@" >/dev/null
 }
 
 # shellcheck disable=SC2016  # ${{...}} are Railway references, resolved by Railway
@@ -192,16 +216,16 @@ set_vars worker "${COMMON[@]}" --set "SERVICE_ROLE=worker" --set "WORKER_CONCURR
 # The web container runs migrations before it starts serving (scripts/start.sh), so
 # a failed migration fails the health check and the old release keeps serving.
 say "Deploying web (runs migrations first)"
-railway up --service web --detach
+railway_retry railway up --service web --detach
 say "Deploying worker"
-railway up --service worker --detach
+railway_retry railway up --service worker --detach
 
 # ---------------------------------------------------------------- wait for health
 # Status of a service's newest deployment (SUCCESS once its /api/ready health
 # check has passed, see railway.json). Polling this rather than the public URL
 # means a re-run does not mistake the previous, still-serving release for the new one.
 latest_status() {
-  railway deployment list --service "$1" --limit 1 --json </dev/null 2>/dev/null | node -e '
+  railway_retry railway deployment list --service "$1" --limit 1 --json </dev/null 2>/dev/null | node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
       let status = "";
@@ -252,7 +276,7 @@ login_status="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST "$BASE_URL/
   -H 'content-type: application/json' --data-binary @- <<<"$login_body" || true)"
 if [ "$login_status" = "200" ]; then
   echo "  $OWNER_EMAIL can sign in; removing OWNER_PASSWORD from Railway"
-  railway variable delete OWNER_PASSWORD --service web </dev/null >/dev/null 2>&1 \
+  railway_retry railway variable delete OWNER_PASSWORD --service web </dev/null >/dev/null 2>&1 \
     || echo "  could not remove it automatically: delete OWNER_PASSWORD in web > Variables"
 else
   printf '\n\033[1;33m! Signing in as %s failed (HTTP %s). OWNER_PASSWORD is kept.\033[0m\n' "$OWNER_EMAIL" "${login_status:-none}"
